@@ -1,0 +1,25 @@
+# Elderly-monitor assignment: core + vision + agent dependencies.
+# Install inside a virtual environment using: python -m pip install -r requirements.txt
+
+# Video and image processing
+opencv-python>=4.10
+Pillow>=10.0
+
+# Data handling and evaluation
+numpy>=1.26
+pandas>=2.2
+scikit-learn>=1.5
+matplotlib>=3.8
+
+# Configuration and environment variables
+PyYAML>=6.0
+python-dotenv>=1.0
+
+# Person detection, pose estimation, and tracking
+ultralytics>=8.3
+
+# Agent workflow orchestration (used in a later step)
+langgraph>=0.2
+
+# Tests
+pytest>=8.0

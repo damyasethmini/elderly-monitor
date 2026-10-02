@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+.Python
+.venv/
+venv/
+.env
+/venv
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Generated outputs and model weights
+runs/
+results/*
+!results/.gitkeep
+*.pt
+*.onnx
+*.engine
+
+# Keep folder placeholders but do not commit private/test video data by default
+# Remove these ignore rules if you intentionally want to version small test assets.
+data/videos/*
+!data/videos/.gitkeep
+data/ground_truth/*
+!data/ground_truth/.gitkeep
+data/bed_regions/*
+!data/bed_regions/.gitkeep
+
+
+*.mp4

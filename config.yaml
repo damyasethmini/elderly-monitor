@@ -1,0 +1,69 @@
+# Main configuration for elderly-monitor.
+# Values are initial placeholders and will be tuned after testing videos.
+
+video:
+  # Number of frames analyzed per second of video.
+  # 1.0 means sample approximately one frame per second.
+  sampling_fps: 1.0
+  # Resize/inference size used by the vision model in later steps.
+  image_size: 640
+  # Set to null to process the entire video. Useful to limit testing time.
+  max_frames: null
+
+perception:
+  person_confidence_threshold: 0.40
+  pose_model: "yolo11n-pose.pt"
+  pose_confidence: 0.35
+  pose_image_size: 640
+  pose_device: "cpu"
+  # VLM will be used later only when the normal pipeline is uncertain.
+  use_vlm_fallback: false
+
+state:
+  # Number of recent observations considered when smoothing predictions.
+  smoothing_window: 5
+  # Ignore very short state changes unless supported by stronger evidence.
+  min_state_duration_sec: 2.0
+  # Use UNKNOWN when evidence is too weak.
+  unknown_confidence_threshold: 0.40
+  
+  lying_body_axis_angle_deg: 55.0
+  lying_conflicting_bbox_aspect_ratio: 0.90
+
+  sitting_body_axis_max_deg: 35.0
+  sitting_knee_hip_gap_max: 0.16
+  sitting_bbox_aspect_max: 1.20
+
+  upright_bbox_aspect_max: 1.20
+  upright_pose_span_y_min: 0.45
+
+  walking_motion_threshold: 0.15
+  walking_bbox_aspect_max: 1.20
+
+  keypoint_confidence: 0.30
+
+bed_region:
+  # Start with a manually defined polygon for each test video.
+  # Coordinates should be normalized from 0.0 to 1.0:
+  # [top-left, top-right, bottom-right, bottom-left], for example.
+  mode: "manual"
+  polygon: []
+
+bed_events:
+  # Require the relevant transition pattern to persist before confirming an event.
+  exit_confirmation_sec: 3.0
+  return_confirmation_sec: 3.0
+  # The implementation will also consider movement away from/toward the bed.
+  movement_distance_px: 60
+
+alerts:
+  # Example configurable rules; these are not clinically validated thresholds.
+  sitting_on_bed_edge_monitor_sec: 120
+  prolonged_out_of_bed_monitor_sec: 300
+  prolonged_out_of_bed_alert_sec: 600
+  unknown_state_monitor_sec: 30
+
+output:
+  directory: "results"
+  save_annotated_video: false
+  save_frame_debug_images: false
