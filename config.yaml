@@ -42,12 +42,13 @@ state:
   # Step 4
   smoothing_window: 5
   min_state_duration_sec: 2.0
-  unknown_confidence_threshold: 0.4
+  unknown_confidence_threshold: 0.40
   
 events:
   min_stable_duration_sec: 2.0
   min_out_of_bed_confirmation_sec: 1.5
   min_return_confirmation_sec: 1.0
+  min_movement_away_from_bed_norm: 0.15
 
 bed_region:
   # Start with a manually defined polygon for each test video.

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+from math import hypot
 from pathlib import Path
+from statistics import median
 from typing import Any
 
 from src.state.smoothing import (
@@ -157,6 +159,147 @@ def _point_inside_bed(
         bed_region["min_x"] <= center_x <= bed_region["max_x"]
         and bed_region["min_y"] <= center_y <= bed_region["max_y"]
     )
+
+
+def _distance_from_bed_region(
+    center_x: float,
+    center_y: float,
+    bed_region: dict[str, Any],
+) -> float:
+    """Return Euclidean distance from a point to the bed rectangle.
+
+    Distance is zero when the point is inside the learned bed region.
+    """
+
+    if (
+        bed_region["min_x"]
+        <= center_x
+        <= bed_region["max_x"]
+        and bed_region["min_y"]
+        <= center_y
+        <= bed_region["max_y"]
+    ):
+        return 0.0
+
+    dx = 0.0
+    dy = 0.0
+
+    if center_x < bed_region["min_x"]:
+        dx = bed_region["min_x"] - center_x
+    elif center_x > bed_region["max_x"]:
+        dx = center_x - bed_region["max_x"]
+
+    if center_y < bed_region["min_y"]:
+        dy = bed_region["min_y"] - center_y
+    elif center_y > bed_region["max_y"]:
+        dy = center_y - bed_region["max_y"]
+
+    return hypot(dx, dy)
+
+
+def _annotate_segment_movement(
+    segments: list[dict[str, Any]],
+    observations: list[dict[str, Any]],
+    bed_region: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Add movement-away-from-bed measurements to timeline segments."""
+
+    if bed_region is None:
+        for segment in segments:
+            segment["start_distance_from_bed_px"] = None
+            segment["max_distance_from_bed_px"] = None
+            segment["movement_away_from_bed_px"] = None
+            segment["movement_away_from_bed_norm"] = None
+            segment["center_displacement_px"] = None
+        return segments
+
+    for segment in segments:
+        start_sec = float(segment.get("start_sec", 0.0))
+        end_sec = float(segment.get("end_sec", start_sec))
+
+        segment_observations = []
+        for observation in observations:
+            timestamp = float(
+                observation.get("timestamp_sec", -1.0)
+            )
+            if start_sec <= timestamp < end_sec:
+                segment_observations.append(observation)
+
+        if not segment_observations:
+            segment["start_distance_from_bed_px"] = None
+            segment["max_distance_from_bed_px"] = None
+            segment["movement_away_from_bed_px"] = None
+            segment["movement_away_from_bed_norm"] = None
+            segment["center_displacement_px"] = None
+            continue
+
+        points: list[tuple[float, float]] = []
+        distances: list[float] = []
+        widths: list[float] = []
+
+        for observation in segment_observations:
+            features = observation.get("features", {})
+            center_x = _numeric(features.get("bbox_center_x"))
+            center_y = _numeric(features.get("bbox_center_y"))
+            bbox_width = _numeric(features.get("bbox_width"))
+
+            if center_x is None or center_y is None:
+                continue
+
+            points.append((center_x, center_y))
+            distances.append(
+                _distance_from_bed_region(
+                    center_x,
+                    center_y,
+                    bed_region,
+                )
+            )
+
+            if bbox_width is not None:
+                widths.append(max(1.0, bbox_width))
+
+        if not points:
+            segment["start_distance_from_bed_px"] = None
+            segment["max_distance_from_bed_px"] = None
+            segment["movement_away_from_bed_px"] = None
+            segment["movement_away_from_bed_norm"] = None
+            segment["center_displacement_px"] = None
+            continue
+
+        start_distance = distances[0]
+        max_distance = max(distances)
+        movement_away = max(0.0, max_distance - start_distance)
+
+        scale = median(widths) if widths else 1.0
+        first_x, first_y = points[0]
+        last_x, last_y = points[-1]
+        center_displacement = hypot(
+            last_x - first_x,
+            last_y - first_y,
+        )
+
+        segment["start_distance_from_bed_px"] = round(
+            start_distance,
+            3,
+        )
+        segment["max_distance_from_bed_px"] = round(
+            max_distance,
+            3,
+        )
+        segment["movement_away_from_bed_px"] = round(
+            movement_away,
+            3,
+        )
+        segment["movement_away_from_bed_norm"] = round(
+            movement_away / max(1.0, scale),
+            4,
+        )
+        segment["center_displacement_px"] = round(
+            center_displacement,
+            3,
+        )
+
+    return segments
 
 
 def _apply_spatial_state(
@@ -335,6 +478,12 @@ def build_timeline(
     segments = build_stable_segments(
         observations=spatial_observations,
         min_state_duration_sec=min_state_duration_sec,
+    )
+
+    segments = _annotate_segment_movement(
+        segments=segments,
+        observations=spatial_observations,
+        bed_region=bed_region,
     )
 
     frame_interval = estimate_frame_interval(

@@ -960,38 +960,19 @@
 
 """Command-line entry point for the elderly-monitor assignment.
 
-Supported stages:
+The CLI currently supports:
+    - environment/setup checks
+    - video metadata inspection
+    - frame sampling
+    - YOLO Pose estimation
+    - activity and bed-occupancy classification
 
-    Step 1:
-        --check-setup
-
-    Video inspection:
-        --video <path>
-
-    Step 2:
-        --sample-video <path>
-
-    Step 3A:
-        --pose-video <path>
-
-    Step 3B:
-        --state-video <path>
-
-    Step 4:
-        --events-video <path>
-
-Step 4 adds:
-    - temporal smoothing
-    - stable state segments
-    - activity timeline
-    - bed exit detection
-    - bed return detection
-
-Later stages can add:
+Later stages will add:
+    - temporal state tracking
+    - bed exit/return events
     - agentic reasoning
-    - NORMAL / MONITOR / ALERT
-    - evaluation
-    - reporting
+    - safety alerts
+    - evaluation and reporting
 """
 
 from __future__ import annotations
@@ -1006,45 +987,16 @@ from typing import Any
 import cv2
 import yaml
 
-from src.perception.frame_sampler import (
-    sample_video,
-    write_manifest,
-)
-
-from src.perception.detector import (
-    run_pose_pipeline,
-)
-
-from src.state.classifier import (
-    classify_pose_manifest,
-)
-
-from src.state.state_machine import (
-    build_timeline,
-)
-
-from src.events.bed_events import (
-    detect_bed_events,
-    save_events,
-)
+from src.perception.frame_sampler import sample_video, write_manifest
+from src.perception.detector import run_pose_pipeline
+from src.state.classifier import classify_pose_manifest
+from src.state.state_machine import build_timeline
+from src.events.bed_events import detect_bed_events, save_events
 
 
-# ============================================================
-# Project paths
-# ============================================================
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+CONFIG_PATH = PROJECT_ROOT / "config.yaml"
 
-PROJECT_ROOT = (
-    Path(__file__).resolve().parents[1]
-)
-
-CONFIG_PATH = (
-    PROJECT_ROOT / "config.yaml"
-)
-
-
-# ============================================================
-# Dependency list
-# ============================================================
 
 DEPENDENCIES = {
     "cv2": "opencv-python",
@@ -1061,129 +1013,65 @@ DEPENDENCIES = {
 }
 
 
-# ============================================================
-# Configuration
-# ============================================================
-
-def load_config(
-    path: Path = CONFIG_PATH,
-) -> dict[str, Any]:
-    """Load YAML configuration."""
-
+def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:
+    """Load YAML configuration and validate that it contains a mapping."""
     if not path.is_file():
-        raise FileNotFoundError(
-            f"Config file not found: {path}"
-        )
+        raise FileNotFoundError(f"Config file not found: {path}")
 
-    with path.open(
-        "r",
-        encoding="utf-8",
-    ) as file:
+    with path.open("r", encoding="utf-8") as file:
         config = yaml.safe_load(file)
 
     if not isinstance(config, dict):
         raise ValueError(
-            "config.yaml must contain a YAML "
-            "mapping at the top level."
+            "config.yaml must contain a YAML mapping at the top level."
         )
 
     return config
 
 
-# ============================================================
-# Setup checks
-# ============================================================
-
-def check_dependencies() -> tuple[
-    list[str],
-    list[str],
-]:
-    """Return installed and missing dependencies."""
-
+def check_dependencies() -> tuple[list[str], list[str]]:
+    """Return installed and missing dependency names."""
     installed: list[str] = []
     missing: list[str] = []
 
-    for import_name, package_name in (
-        DEPENDENCIES.items()
-    ):
+    for import_name, package_name in DEPENDENCIES.items():
         try:
-            found = (
-                importlib.util.find_spec(
-                    import_name
-                )
-                is not None
-            )
-        except (
-            ImportError,
-            ValueError,
-        ):
+            found = importlib.util.find_spec(import_name) is not None
+        except (ImportError, ValueError):
             found = False
 
         if found:
-            installed.append(
-                package_name
-            )
+            installed.append(package_name)
         else:
-            missing.append(
-                package_name
-            )
+            missing.append(package_name)
 
     return installed, missing
 
 
 def check_setup() -> int:
-    """Check Python, dependencies, config,
-    and required folders.
-    """
+    """Check Python, dependencies, config, and expected project folders."""
+    print("Elderly Monitor — setup check")
+    print("=" * 32)
 
-    print(
-        "Elderly Monitor — setup check"
-    )
+    print(f"Python: {sys.version.split()[0]}")
+    print(f"Project root: {PROJECT_ROOT}")
 
-    print(
-        "=" * 32
-    )
-
-    print(
-        f"Python: "
-        f"{sys.version.split()[0]}"
-    )
-
-    print(
-        f"Project root: "
-        f"{PROJECT_ROOT}"
-    )
-
-    if sys.version_info < (
-        3,
-        10,
-    ):
+    if sys.version_info < (3, 10):
         print(
             "WARNING: Python 3.10+ is recommended; "
             "use Python 3.11 for this project."
         )
 
-    # --------------------------------------------------------
-    # Config
-    # --------------------------------------------------------
-
+    # ---------------------------------------------------------
+    # Config check
+    # ---------------------------------------------------------
     try:
         config = load_config()
 
-        print(
-            f"Config: OK "
-            f"({CONFIG_PATH.name})"
-        )
+        print(f"Config: OK ({CONFIG_PATH.name})")
 
-        video_config = config.get(
-            "video",
-            {},
-        )
-
-        perception_config = config.get(
-            "perception",
-            {},
-        )
+        video_config = config.get("video", {})
+        perception_config = config.get("perception", {})
 
         print(
             "Video sampling FPS: "
@@ -1200,195 +1088,113 @@ def check_setup() -> int:
         ValueError,
         yaml.YAMLError,
     ) as exc:
-
-        print(
-            f"Config: ERROR — {exc}"
-        )
-
+        print(f"Config: ERROR — {exc}")
         return 1
 
-    # --------------------------------------------------------
-    # Folders
-    # --------------------------------------------------------
-
+    # ---------------------------------------------------------
+    # Folder check
+    # ---------------------------------------------------------
     expected_dirs = [
-        PROJECT_ROOT
-        / "data"
-        / "videos",
-
-        PROJECT_ROOT
-        / "data"
-        / "ground_truth",
-
-        PROJECT_ROOT
-        / "data"
-        / "bed_regions",
-
-        PROJECT_ROOT
-        / "results",
+        PROJECT_ROOT / "data" / "videos",
+        PROJECT_ROOT / "data" / "ground_truth",
+        PROJECT_ROOT / "data" / "bed_regions",
+        PROJECT_ROOT / "results",
     ]
 
     missing_dirs = [
-        str(
-            folder.relative_to(
-                PROJECT_ROOT
-            )
-        )
+        str(folder.relative_to(PROJECT_ROOT))
         for folder in expected_dirs
         if not folder.is_dir()
     ]
 
     if missing_dirs:
-
-        print(
-            "Folders missing:"
-        )
+        print("Folders missing:")
 
         for folder in missing_dirs:
-            print(
-                f"  - {folder}"
-            )
+            print(f"  - {folder}")
 
         return 1
 
-    print(
-        "Project folders: OK"
-    )
+    print("Project folders: OK")
 
-    # --------------------------------------------------------
-    # Dependencies
-    # --------------------------------------------------------
-
-    installed, missing = (
-        check_dependencies()
-    )
+    # ---------------------------------------------------------
+    # Dependency check
+    # ---------------------------------------------------------
+    installed, missing = check_dependencies()
 
     print(
         f"Dependencies installed: "
-        f"{len(installed)}/"
-        f"{len(DEPENDENCIES)}"
+        f"{len(installed)}/{len(DEPENDENCIES)}"
     )
 
     if installed:
-        print(
-            "  OK: "
-            + ", ".join(installed)
-        )
+        print("  OK: " + ", ".join(installed))
 
     if missing:
-
-        print(
-            "  Missing: "
-            + ", ".join(missing)
-        )
+        print("  Missing: " + ", ".join(missing))
 
         print(
             "Install them with: "
-            "python -m pip install "
-            "-r requirements.txt"
+            "python -m pip install -r requirements.txt"
         )
 
         return 1
 
-    print(
-        "\nSetup looks ready."
-    )
+    print("\nSetup looks ready.")
 
     print(
-        "\nAvailable stages:"
+        "Available stages:"
     )
-
     print(
-        "  Step 2: "
-        "--sample-video <path>"
+        "  Step 2: --sample-video <path>"
     )
-
     print(
-        "  Step 3A: "
-        "--pose-video <path>"
+        "  Step 3A: --pose-video <path>"
     )
-
     print(
-        "  Step 3B: "
-        "--state-video <path>"
-    )
-
-    print(
-        "  Step 4: "
-        "--events-video <path>"
+        "  Step 3B: --state-video <path>"
     )
 
     return 0
 
 
-# ============================================================
-# Video inspection
-# ============================================================
-
-def inspect_video(
-    video_path: Path,
-) -> int:
-    """Check that OpenCV can open the video."""
+def inspect_video(video_path: Path) -> int:
+    """Check that OpenCV can open the requested video and print metadata."""
 
     if not video_path.is_absolute():
-        video_path = (
-            Path.cwd()
-            / video_path
-        ).resolve()
+        video_path = (Path.cwd() / video_path).resolve()
 
     if not video_path.is_file():
-
         print(
-            f"ERROR: Video file not found: "
-            f"{video_path}",
+            f"ERROR: Video file not found: {video_path}",
             file=sys.stderr,
         )
-
         return 2
 
-    capture = cv2.VideoCapture(
-        str(video_path)
-    )
+    capture = cv2.VideoCapture(str(video_path))
 
     try:
-
         if not capture.isOpened():
-
             print(
-                "ERROR: OpenCV could not "
-                "open this video: "
-                f"{video_path}",
+                f"ERROR: OpenCV could not open this video: {video_path}",
                 file=sys.stderr,
             )
-
             return 2
 
         fps = float(
-            capture.get(
-                cv2.CAP_PROP_FPS
-            )
-            or 0.0
+            capture.get(cv2.CAP_PROP_FPS) or 0.0
         )
 
         frame_count = int(
-            capture.get(
-                cv2.CAP_PROP_FRAME_COUNT
-            )
-            or 0
+            capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0
         )
 
         width = int(
-            capture.get(
-                cv2.CAP_PROP_FRAME_WIDTH
-            )
-            or 0
+            capture.get(cv2.CAP_PROP_FRAME_WIDTH) or 0
         )
 
         height = int(
-            capture.get(
-                cv2.CAP_PROP_FRAME_HEIGHT
-            )
-            or 0
+            capture.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0
         )
 
         duration_sec = (
@@ -1401,23 +1207,12 @@ def inspect_video(
             "video": str(video_path),
             "width": width,
             "height": height,
-            "source_fps": round(
-                fps,
-                3,
-            ),
+            "source_fps": round(fps, 3),
             "frame_count": frame_count,
-            "duration_sec": round(
-                duration_sec,
-                3,
-            ),
+            "duration_sec": round(duration_sec, 3),
         }
 
-        print(
-            json.dumps(
-                details,
-                indent=2,
-            )
-        )
+        print(json.dumps(details, indent=2))
 
         print(
             "\nVideo input check passed."
@@ -1426,46 +1221,35 @@ def inspect_video(
         return 0
 
     finally:
-
         capture.release()
 
-
-# ============================================================
-# Step 2 - Frame sampling
-# ============================================================
 
 def sample_video_command(
     video_path: Path,
     sampling_fps: float | None = None,
     max_frames: int | None = None,
 ) -> int:
-    """Sample a video and create frame_manifest.json."""
+    """Sample a video and write JPEG frames plus a JSON manifest."""
 
     if not video_path.is_absolute():
-
-        video_path = (
-            Path.cwd()
-            / video_path
-        ).resolve()
+        video_path = (Path.cwd() / video_path).resolve()
 
     try:
-
         config = load_config()
 
         video_config = config.get(
             "video",
-            {},
+            {}
         )
 
         output_config = config.get(
             "output",
-            {},
+            {}
         )
 
-        # ----------------------------------------------------
+        # -----------------------------------------------------
         # Sampling configuration
-        # ----------------------------------------------------
-
+        # -----------------------------------------------------
         rate = float(
             sampling_fps
             if sampling_fps is not None
@@ -1484,19 +1268,14 @@ def sample_video_command(
         )
 
         if frame_limit is not None:
-            frame_limit = int(
-                frame_limit
-            )
+            frame_limit = int(frame_limit)
 
-        # ----------------------------------------------------
-        # Output
-        # ----------------------------------------------------
-
-        output_root_value = (
-            output_config.get(
-                "directory",
-                "results",
-            )
+        # -----------------------------------------------------
+        # Output locations
+        # -----------------------------------------------------
+        output_root_value = output_config.get(
+            "directory",
+            "results",
         )
 
         output_root = Path(
@@ -1504,30 +1283,23 @@ def sample_video_command(
         )
 
         if not output_root.is_absolute():
-            output_root = (
-                PROJECT_ROOT
-                / output_root
-            )
+            output_root = PROJECT_ROOT / output_root
 
         run_dir = (
-            output_root
-            / video_path.stem
+            output_root / video_path.stem
         )
 
         frames_dir = (
-            run_dir
-            / "frames"
+            run_dir / "frames"
         )
 
         manifest_path = (
-            run_dir
-            / "frame_manifest.json"
+            run_dir / "frame_manifest.json"
         )
 
-        # ----------------------------------------------------
-        # Run sampler
-        # ----------------------------------------------------
-
+        # -----------------------------------------------------
+        # Run frame sampler
+        # -----------------------------------------------------
         manifest = sample_video(
             video_path=video_path,
             frames_dir=frames_dir,
@@ -1535,19 +1307,17 @@ def sample_video_command(
             max_frames=frame_limit,
         )
 
-        manifest[
-            "frames_directory"
-        ] = "frames"
+        # Make manifest paths portable.
+        manifest["frames_directory"] = "frames"
 
         write_manifest(
             manifest,
             manifest_path,
         )
 
-        # ----------------------------------------------------
-        # Output
-        # ----------------------------------------------------
-
+        # -----------------------------------------------------
+        # Print result
+        # -----------------------------------------------------
         print(
             "Frame sampling completed successfully."
         )
@@ -1594,68 +1364,50 @@ def sample_video_command(
         OSError,
         yaml.YAMLError,
     ) as exc:
-
         print(
             f"ERROR: {exc}",
             file=sys.stderr,
         )
-
         return 2
 
-
-# ============================================================
-# Step 3A - YOLO Pose
-# ============================================================
 
 def pose_video_command(
     video_path: Path,
 ) -> int:
-    """Run YOLO Pose estimation."""
+    """Run YOLO Pose estimation on previously sampled video frames."""
 
     if not video_path.is_absolute():
-
-        video_path = (
-            Path.cwd()
-            / video_path
-        ).resolve()
+        video_path = (Path.cwd() / video_path).resolve()
 
     if not video_path.is_file():
-
         print(
-            f"ERROR: Video file not found: "
-            f"{video_path}",
+            f"ERROR: Video file not found: {video_path}",
             file=sys.stderr,
         )
-
         return 2
 
     try:
-
+        # -----------------------------------------------------
+        # Load config
+        # -----------------------------------------------------
         config = load_config()
 
-        perception_config = (
-            config.get(
-                "perception",
-                {},
-            )
+        perception_config = config.get(
+            "perception",
+            {}
         )
 
-        output_config = (
-            config.get(
-                "output",
-                {},
-            )
+        output_config = config.get(
+            "output",
+            {}
         )
 
-        # ----------------------------------------------------
+        # -----------------------------------------------------
         # Pose configuration
-        # ----------------------------------------------------
-
-        model_name = (
-            perception_config.get(
-                "pose_model",
-                "yolo11n-pose.pt",
-            )
+        # -----------------------------------------------------
+        model_name = perception_config.get(
+            "pose_model",
+            "yolo11n-pose.pt",
         )
 
         confidence = float(
@@ -1672,22 +1424,17 @@ def pose_video_command(
             )
         )
 
-        device = (
-            perception_config.get(
-                "pose_device",
-                "cpu",
-            )
+        device = perception_config.get(
+            "pose_device",
+            "cpu",
         )
 
-        # ----------------------------------------------------
-        # Output
-        # ----------------------------------------------------
-
-        output_root_value = (
-            output_config.get(
-                "directory",
-                "results",
-            )
+        # -----------------------------------------------------
+        # Output directory
+        # -----------------------------------------------------
+        output_root_value = output_config.get(
+            "directory",
+            "results",
         )
 
         output_root = Path(
@@ -1696,29 +1443,23 @@ def pose_video_command(
 
         if not output_root.is_absolute():
             output_root = (
-                PROJECT_ROOT
-                / output_root
+                PROJECT_ROOT / output_root
             )
 
         run_dir = (
-            output_root
-            / video_path.stem
+            output_root / video_path.stem
         )
 
         manifest_path = (
-            run_dir
-            / "frame_manifest.json"
+            run_dir / "frame_manifest.json"
         )
 
-        # ----------------------------------------------------
-        # Step 2 dependency
-        # ----------------------------------------------------
-
+        # -----------------------------------------------------
+        # Step 2 dependency check
+        # -----------------------------------------------------
         if not manifest_path.is_file():
-
             print(
-                "ERROR: frame_manifest.json "
-                "was not found.",
+                "ERROR: frame_manifest.json was not found.",
                 file=sys.stderr,
             )
 
@@ -1740,9 +1481,11 @@ def pose_video_command(
 
             return 2
 
+        # -----------------------------------------------------
+        # Run YOLO Pose
+        # -----------------------------------------------------
         pose_output_dir = (
-            run_dir
-            / "pose"
+            run_dir / "pose"
         )
 
         print(
@@ -1758,8 +1501,7 @@ def pose_video_command(
         )
 
         print(
-            f"Confidence threshold: "
-            f"{confidence}"
+            f"Confidence threshold: {confidence}"
         )
 
         print(
@@ -1781,9 +1523,11 @@ def pose_video_command(
             device=device,
         )
 
+        # -----------------------------------------------------
+        # Print results
+        # -----------------------------------------------------
         print(
-            "\nYOLO pose estimation "
-            "completed successfully."
+            "\nYOLO pose estimation completed successfully."
         )
 
         print(
@@ -1823,68 +1567,50 @@ def pose_video_command(
         ValueError,
         OSError,
     ) as exc:
-
         print(
             f"ERROR: {exc}",
             file=sys.stderr,
         )
-
         return 2
 
-
-# ============================================================
-# Step 3B - Activity/state classification
-# ============================================================
 
 def state_video_command(
     video_path: Path,
 ) -> int:
-    """Classify activity and bed occupancy."""
+    """Classify activity and bed occupancy from YOLO Pose results."""
 
     if not video_path.is_absolute():
-
-        video_path = (
-            Path.cwd()
-            / video_path
-        ).resolve()
+        video_path = (Path.cwd() / video_path).resolve()
 
     if not video_path.is_file():
-
         print(
-            f"ERROR: Video file not found: "
-            f"{video_path}",
+            f"ERROR: Video file not found: {video_path}",
             file=sys.stderr,
         )
-
         return 2
 
     try:
-
+        # -----------------------------------------------------
+        # Load configuration
+        # -----------------------------------------------------
         config = load_config()
 
-        state_config = (
-            config.get(
-                "state",
-                {},
-            )
+        state_config = config.get(
+            "state",
+            {}
         )
 
-        output_config = (
-            config.get(
-                "output",
-                {},
-            )
+        output_config = config.get(
+            "output",
+            {}
         )
 
-        # ----------------------------------------------------
-        # Output
-        # ----------------------------------------------------
-
-        output_root_value = (
-            output_config.get(
-                "directory",
-                "results",
-            )
+        # -----------------------------------------------------
+        # Output location
+        # -----------------------------------------------------
+        output_root_value = output_config.get(
+            "directory",
+            "results",
         )
 
         output_root = Path(
@@ -1893,13 +1619,11 @@ def state_video_command(
 
         if not output_root.is_absolute():
             output_root = (
-                PROJECT_ROOT
-                / output_root
+                PROJECT_ROOT / output_root
             )
 
         run_dir = (
-            output_root
-            / video_path.stem
+            output_root / video_path.stem
         )
 
         pose_manifest_path = (
@@ -1908,21 +1632,17 @@ def state_video_command(
             / "pose_manifest.json"
         )
 
-        # ----------------------------------------------------
-        # Step 3A dependency
-        # ----------------------------------------------------
-
+        # -----------------------------------------------------
+        # Step 3A dependency check
+        # -----------------------------------------------------
         if not pose_manifest_path.is_file():
-
             print(
-                "ERROR: pose_manifest.json "
-                "was not found.",
+                "ERROR: pose_manifest.json was not found.",
                 file=sys.stderr,
             )
 
             print(
-                f"Expected: "
-                f"{pose_manifest_path}",
+                f"Expected: {pose_manifest_path}",
                 file=sys.stderr,
             )
 
@@ -1939,14 +1659,15 @@ def state_video_command(
 
             return 2
 
+        # -----------------------------------------------------
+        # Run classifier
+        # -----------------------------------------------------
         state_output_dir = (
-            run_dir
-            / "state"
+            run_dir / "state"
         )
 
         print(
-            "\nStarting activity/state "
-            "classification..."
+            "\nStarting activity/state classification..."
         )
 
         print(
@@ -1960,51 +1681,30 @@ def state_video_command(
 
         print()
 
-        result = (
-            classify_pose_manifest(
-                pose_manifest_path=(
-                    pose_manifest_path
-                ),
-                output_dir=(
-                    state_output_dir
-                ),
-                thresholds=(
-                    state_config
-                ),
-            )
+        result = classify_pose_manifest(
+            pose_manifest_path=pose_manifest_path,
+            output_dir=state_output_dir,
+            thresholds=state_config,
         )
 
-        # ----------------------------------------------------
-        # Count activities
-        # ----------------------------------------------------
+        # -----------------------------------------------------
+        # Count activities and occupancy
+        # -----------------------------------------------------
+        activity_counts: dict[str, int] = {}
 
-        activity_counts: dict[
-            str,
-            int,
-        ] = {}
+        occupancy_counts: dict[str, int] = {}
 
-        occupancy_counts: dict[
-            str,
-            int,
-        ] = {}
+        for observation in result["observations"]:
 
-        for observation in (
-            result["observations"]
-        ):
+            activity = observation[
+                "activity"
+            ]
 
-            activity = (
-                observation["activity"]
-            )
+            occupancy = observation[
+                "bed_occupancy"
+            ]
 
-            occupancy = (
-                observation[
-                    "bed_occupancy"
-                ]
-            )
-
-            activity_counts[
-                activity
-            ] = (
+            activity_counts[activity] = (
                 activity_counts.get(
                     activity,
                     0,
@@ -2012,9 +1712,7 @@ def state_video_command(
                 + 1
             )
 
-            occupancy_counts[
-                occupancy
-            ] = (
+            occupancy_counts[occupancy] = (
                 occupancy_counts.get(
                     occupancy,
                     0,
@@ -2022,13 +1720,11 @@ def state_video_command(
                 + 1
             )
 
-        # ----------------------------------------------------
-        # Print
-        # ----------------------------------------------------
-
+        # -----------------------------------------------------
+        # Print result
+        # -----------------------------------------------------
         print(
-            "\nState classification "
-            "completed successfully."
+            "\nState classification completed successfully."
         )
 
         print(
@@ -2040,10 +1736,7 @@ def state_video_command(
             "\nActivity counts:"
         )
 
-        for activity, count in (
-            activity_counts.items()
-        ):
-
+        for activity, count in activity_counts.items():
             print(
                 f"  {activity}: {count}"
             )
@@ -2052,10 +1745,7 @@ def state_video_command(
             "\nBed occupancy counts:"
         )
 
-        for occupancy, count in (
-            occupancy_counts.items()
-        ):
-
+        for occupancy, count in occupancy_counts.items():
             print(
                 f"  {occupancy}: {count}"
             )
@@ -2073,97 +1763,46 @@ def state_video_command(
         OSError,
         yaml.YAMLError,
     ) as exc:
-
         print(
             f"ERROR: {exc}",
             file=sys.stderr,
         )
-
         return 2
 
 
-# ============================================================
-# Step 4 - Temporal tracking and events
-# ============================================================
 
 def events_video_command(
     video_path: Path,
 ) -> int:
-    """Run temporal smoothing, timeline generation,
-    and bed exit/return detection.
-    """
+    """Run Step 4 temporal tracking, timeline generation, and bed events."""
 
     if not video_path.is_absolute():
-
         video_path = (
-            Path.cwd()
-            / video_path
+            Path.cwd() / video_path
         ).resolve()
 
     if not video_path.is_file():
-
         print(
-            f"ERROR: Video file not found: "
-            f"{video_path}",
+            f"ERROR: Video file not found: {video_path}",
             file=sys.stderr,
         )
-
         return 2
 
     try:
-
         config = load_config()
 
-        state_config = (
-            config.get(
-                "state",
-                {},
-            )
-        )
-
-        events_config = (
-            config.get(
-                "events",
-                {},
-            )
-        )
-
-        output_config = (
-            config.get(
-                "output",
-                {},
-            )
-        )
-
-        # ----------------------------------------------------
-        # Output root
-        # ----------------------------------------------------
-
-        output_root_value = (
-            output_config.get(
-                "directory",
-                "results",
-            )
-        )
+        state_config = config.get("state", {})
+        events_config = config.get("events", {})
+        output_config = config.get("output", {})
 
         output_root = Path(
-            output_root_value
+            output_config.get("directory", "results")
         )
 
         if not output_root.is_absolute():
-            output_root = (
-                PROJECT_ROOT
-                / output_root
-            )
+            output_root = PROJECT_ROOT / output_root
 
-        run_dir = (
-            output_root
-            / video_path.stem
-        )
-
-        # ----------------------------------------------------
-        # Step 3B dependency
-        # ----------------------------------------------------
+        run_dir = output_root / video_path.stem
 
         state_manifest_path = (
             run_dir
@@ -2172,41 +1811,29 @@ def events_video_command(
         )
 
         if not state_manifest_path.is_file():
-
             print(
-                "ERROR: state_manifest.json "
-                "was not found.",
+                "ERROR: state_manifest.json was not found.",
                 file=sys.stderr,
             )
-
             print(
-                f"Expected: "
-                f"{state_manifest_path}",
+                f"Expected: {state_manifest_path}",
                 file=sys.stderr,
             )
-
             print(
                 "\nRun Step 3B first with:",
                 file=sys.stderr,
             )
-
             print(
                 "  python -m src.main "
                 f"--state-video {video_path}",
                 file=sys.stderr,
             )
-
             return 2
 
-        # ----------------------------------------------------
-        # Step 4 configuration
-        # ----------------------------------------------------
+        timeline_output_dir = run_dir / "timeline"
 
         smoothing_window = int(
-            state_config.get(
-                "smoothing_window",
-                5,
-            )
+            state_config.get("smoothing_window", 5)
         )
 
         min_state_duration_sec = float(
@@ -2216,102 +1843,82 @@ def events_video_command(
             )
         )
 
-        unknown_confidence_threshold = (
-            float(
-                state_config.get(
-                    "unknown_confidence_threshold",
-                    0.4,
-                )
+        unknown_confidence_threshold = float(
+            state_config.get(
+                "unknown_confidence_threshold",
+                0.4,
             )
         )
 
-        min_event_duration_sec = (
-            float(
-                events_config.get(
-                    "min_stable_duration_sec",
-                    min_state_duration_sec,
-                )
+        min_event_duration_sec = float(
+            events_config.get(
+                "min_stable_duration_sec",
+                min_state_duration_sec,
             )
         )
 
-        # ----------------------------------------------------
-        # Output directory
-        # ----------------------------------------------------
-
-        temporal_output_dir = (
-            run_dir
-            / "timeline"
+        min_out_of_bed_confirmation_sec = float(
+            events_config.get(
+                "min_out_of_bed_confirmation_sec",
+                1.5,
+            )
         )
 
-        print(
-            "\nStarting temporal state "
-            "tracking..."
+        min_return_confirmation_sec = float(
+            events_config.get(
+                "min_return_confirmation_sec",
+                1.0,
+            )
         )
 
-        print(
-            f"State manifest: "
-            f"{state_manifest_path}"
+        min_movement_away_from_bed_norm = float(
+            events_config.get(
+                "min_movement_away_from_bed_norm",
+                0.15,
+            )
         )
 
-        print(
-            f"Smoothing window: "
-            f"{smoothing_window}"
-        )
-
+        print("\nStarting temporal state tracking...")
+        print(f"State manifest: {state_manifest_path}")
+        print(f"Smoothing window: {smoothing_window}")
         print(
             f"Minimum state duration: "
             f"{min_state_duration_sec:.2f}s"
         )
-
         print(
             f"Event confirmation duration: "
             f"{min_event_duration_sec:.2f}s"
         )
-
-        print()
-
-        # ----------------------------------------------------
-        # Build timeline
-        # ----------------------------------------------------
+        print(
+            f"Movement-away threshold: "
+            f"{min_movement_away_from_bed_norm:.2f}"
+        )
 
         timeline = build_timeline(
-            state_manifest_path=(
-                state_manifest_path
-            ),
-            output_dir=(
-                temporal_output_dir
-            ),
-            smoothing_window=(
-                smoothing_window
-            ),
-            min_state_duration_sec=(
-                min_state_duration_sec
-            ),
-            unknown_confidence_threshold=(
-                unknown_confidence_threshold
-            ),
+            state_manifest_path=state_manifest_path,
+            output_dir=timeline_output_dir,
+            smoothing_window=smoothing_window,
+            min_state_duration_sec=min_state_duration_sec,
+            unknown_confidence_threshold=unknown_confidence_threshold,
         )
 
-        timeline_path = (
-            temporal_output_dir
-            / "timeline.json"
-        )
-
-        # ----------------------------------------------------
-        # Detect events
-        # ----------------------------------------------------
+        timeline_path = timeline_output_dir / "timeline.json"
 
         events = detect_bed_events(
             timeline=timeline,
-            min_stable_duration_sec=(
-                min_event_duration_sec
+            min_stable_duration_sec=min_event_duration_sec,
+            min_out_of_bed_confirmation_sec=(
+                min_out_of_bed_confirmation_sec
+            ),
+            min_return_confirmation_sec=(
+                min_return_confirmation_sec
+            ),
+            min_movement_away_from_bed_norm=(
+                min_movement_away_from_bed_norm
             ),
         )
 
-        events_path = (
-            temporal_output_dir
-            / "bed_events.json"
-        )
+        events_path = timeline_output_dir / "bed_events.json"
 
         save_events(
             events=events,
@@ -2320,51 +1927,47 @@ def events_video_command(
             output_path=events_path,
         )
 
-        # ----------------------------------------------------
-        # Print timeline
-        # ----------------------------------------------------
-
+        print("\nTemporal tracking completed successfully.")
         print(
-            "\nTemporal tracking "
-            "completed successfully."
+            f"Observation duration: "
+            f"{timeline['total_observation_time']}"
         )
-
         print(
             f"Stable segments: "
             f"{len(timeline['segments'])}"
         )
 
-        print(
-            "\nTimeline:"
-        )
-
-        for segment in (
-            timeline["segments"]
-        ):
-
+        print("\nTimeline:")
+        for segment in timeline["segments"]:
             print(
-                f"  "
-                f"{segment['start_sec']:6.1f}s - "
-                f"{segment['end_sec']:6.1f}s  "
-                f"{segment['activity']:20s} "
+                f"  {segment['start_sec']:5.1f}s - "
+                f"{segment['end_sec']:5.1f}s  "
+                f"{segment['activity']:22s} "
                 f"{segment['bed_occupancy']}"
             )
 
-        # ----------------------------------------------------
-        # Events
-        # ----------------------------------------------------
+        print("\nActivity durations:")
+        for activity, duration in timeline[
+            "activity_duration_formatted"
+        ].items():
+            print(
+                f"  {activity:22s} {duration}"
+            )
 
+        print("\nBed summary:")
+        bed_summary = timeline["bed_summary"]
         print(
-            f"\nBed events detected: "
-            f"{len(events)}"
+            f"  Time in bed: "
+            f"{bed_summary['time_in_bed']}"
+        )
+        print(
+            f"  Time out of bed: "
+            f"{bed_summary['time_out_of_bed']}"
         )
 
-        if not events:
-
-            print(
-                "  No bed exit/return events "
-                "were confirmed."
-            )
+        print(
+            f"\nBed events detected: {len(events)}"
+        )
 
         for event in events:
             print(
@@ -2375,19 +1978,8 @@ def events_video_command(
                 f"({event['evidence_strength']})"
             )
 
-        # ----------------------------------------------------
-        # Output files
-        # ----------------------------------------------------
-
-        print(
-            f"\nTimeline file: "
-            f"{timeline_path}"
-        )
-
-        print(
-            f"Events file: "
-            f"{events_path}"
-        )
+        print(f"\nTimeline file: {timeline_path}")
+        print(f"Events file: {events_path}")
 
         return 0
 
@@ -2397,122 +1989,108 @@ def events_video_command(
         OSError,
         yaml.YAMLError,
     ) as exc:
-
         print(
             f"ERROR: {exc}",
             file=sys.stderr,
         )
-
         return 2
 
-
-# ============================================================
-# CLI parser
-# ============================================================
 
 def build_parser() -> argparse.ArgumentParser:
     """Build the command-line argument parser."""
 
     parser = argparse.ArgumentParser(
         description=(
-            "Elderly Monitor: video processing, "
-            "YOLO Pose, state recognition, "
-            "temporal tracking, and bed events."
+            "Elderly Monitor: setup checks, video processing, "
+            "frame sampling, YOLO Pose, and state recognition."
         )
     )
 
-    group = (
-        parser.add_mutually_exclusive_group(
-            required=True
-        )
+    group = parser.add_mutually_exclusive_group(
+        required=True
     )
 
-    # --------------------------------------------------------
+    # ---------------------------------------------------------
     # Step 1
-    # --------------------------------------------------------
-
+    # ---------------------------------------------------------
     group.add_argument(
         "--check-setup",
         action="store_true",
         help=(
-            "Check Python environment, "
-            "dependencies, config, "
-            "and project folders."
+            "Check the Python environment, dependencies, "
+            "config, and folders."
         ),
     )
 
-    # --------------------------------------------------------
+    # ---------------------------------------------------------
     # Video inspection
-    # --------------------------------------------------------
-
+    # ---------------------------------------------------------
     group.add_argument(
         "--video",
         type=Path,
         help=(
-            "Inspect video metadata."
+            "Check that a video can be opened and inspect "
+            "its basic metadata."
         ),
     )
 
-    # --------------------------------------------------------
+    # ---------------------------------------------------------
     # Step 2
-    # --------------------------------------------------------
-
+    # ---------------------------------------------------------
     group.add_argument(
         "--sample-video",
         type=Path,
         help=(
-            "Sample frames from a video."
+            "Sample frames from a video and save a JSON "
+            "timestamp manifest."
         ),
     )
 
-    # --------------------------------------------------------
+    # ---------------------------------------------------------
     # Step 3A
-    # --------------------------------------------------------
-
+    # ---------------------------------------------------------
     group.add_argument(
         "--pose-video",
         type=Path,
         help=(
-            "Run YOLO Pose estimation."
+            "Run YOLO Pose estimation on previously "
+            "sampled frames."
         ),
     )
 
-    # --------------------------------------------------------
+    # ---------------------------------------------------------
     # Step 3B
-    # --------------------------------------------------------
-
+    # ---------------------------------------------------------
     group.add_argument(
         "--state-video",
         type=Path,
         help=(
-            "Classify activity/state "
-            "from pose results."
+            "Classify activity and bed occupancy "
+            "from YOLO Pose results."
         ),
     )
 
-    # --------------------------------------------------------
+    # ---------------------------------------------------------
     # Step 4
-    # --------------------------------------------------------
-
+    # ---------------------------------------------------------
     group.add_argument(
         "--events-video",
         type=Path,
         help=(
-            "Run temporal smoothing, "
-            "timeline generation, and "
-            "bed exit/return detection."
+            "Run temporal smoothing, state tracking, "
+            "and bed exit/return detection."
         ),
     )
 
-    # --------------------------------------------------------
-    # Optional Step 2 parameters
-    # --------------------------------------------------------
-
+    # ---------------------------------------------------------
+    # Optional Step 2 arguments
+    # ---------------------------------------------------------
     parser.add_argument(
         "--sampling-fps",
         type=float,
         help=(
-            "Override video.sampling_fps."
+            "Override video.sampling_fps from config.yaml "
+            "(for example, 1 or 2)."
         ),
     )
 
@@ -2520,85 +2098,63 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-frames",
         type=int,
         help=(
-            "Maximum number of sampled frames."
+            "Optional maximum number of frames to save "
+            "for a quick test."
         ),
     )
 
     return parser
 
 
-# ============================================================
-# Main
-# ============================================================
-
 def main() -> int:
     """CLI entry point."""
 
-    args = (
-        build_parser()
-        .parse_args()
-    )
+    args = build_parser().parse_args()
 
-    # --------------------------------------------------------
+    # ---------------------------------------------------------
     # Step 1
-    # --------------------------------------------------------
-
+    # ---------------------------------------------------------
     if args.check_setup:
-
         return check_setup()
 
-    # --------------------------------------------------------
+    # ---------------------------------------------------------
     # Video inspection
-    # --------------------------------------------------------
-
+    # ---------------------------------------------------------
     if args.video is not None:
-
         return inspect_video(
             args.video
         )
 
-    # --------------------------------------------------------
+    # ---------------------------------------------------------
     # Step 2
-    # --------------------------------------------------------
-
+    # ---------------------------------------------------------
     if args.sample_video is not None:
-
         return sample_video_command(
             args.sample_video,
-            sampling_fps=(
-                args.sampling_fps
-            ),
-            max_frames=(
-                args.max_frames
-            ),
+            sampling_fps=args.sampling_fps,
+            max_frames=args.max_frames,
         )
 
-    # --------------------------------------------------------
+    # ---------------------------------------------------------
     # Step 3A
-    # --------------------------------------------------------
-
+    # ---------------------------------------------------------
     if args.pose_video is not None:
-
         return pose_video_command(
             args.pose_video
         )
 
-    # --------------------------------------------------------
+    # ---------------------------------------------------------
     # Step 3B
-    # --------------------------------------------------------
-
+    # ---------------------------------------------------------
     if args.state_video is not None:
-
         return state_video_command(
             args.state_video
         )
 
-    # --------------------------------------------------------
+    # ---------------------------------------------------------
     # Step 4
-    # --------------------------------------------------------
-
+    # ---------------------------------------------------------
     if args.events_video is not None:
-
         return events_video_command(
             args.events_video
         )
@@ -2607,6 +2163,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(
-        main()
-    )
+    raise SystemExit(main())

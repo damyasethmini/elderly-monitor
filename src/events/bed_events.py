@@ -195,6 +195,7 @@ def detect_bed_events(
     min_stable_duration_sec: float = 2.0,
     min_out_of_bed_confirmation_sec: float = 1.5,
     min_return_confirmation_sec: float = 1.0,
+    min_movement_away_from_bed_norm: float = 0.15,
 ) -> list[dict[str, Any]]:
     """Detect meaningful bed exits and confirmed returns.
 
@@ -251,15 +252,45 @@ def detect_bed_events(
             index,
         )
 
+        out_of_bed_segments = segments[
+            index : final_index + 1
+        ]
+
         spatially_outside = any(
             segment.get("bed_region_contains_outside_point") is True
-            for segment in segments[index : final_index + 1]
+            for segment in out_of_bed_segments
         )
 
         if not spatially_outside:
             continue
 
         if run_duration < min_out_of_bed_confirmation_sec:
+            continue
+
+        # Require actual movement away from the bed, not only a posture
+        # change from sitting/lying to standing. The value is normalized
+        # by the person's typical bounding-box width.
+        movement_values = [
+            float(
+                segment.get(
+                    "movement_away_from_bed_norm",
+                    0.0,
+                )
+                or 0.0
+            )
+            for segment in out_of_bed_segments
+        ]
+
+        max_movement_away_norm = (
+            max(movement_values)
+            if movement_values
+            else 0.0
+        )
+
+        if (
+            max_movement_away_norm
+            < min_movement_away_from_bed_norm
+        ):
             continue
 
         context = _context(
@@ -299,6 +330,10 @@ def detect_bed_events(
                 "out_of_bed_duration_sec": round(
                     run_duration,
                     3,
+                ),
+                "movement_away_from_bed_norm": round(
+                    max_movement_away_norm,
+                    4,
                 ),
                 "confidence": _event_confidence(
                     labels,
@@ -457,13 +492,19 @@ def build_event_summary(
     """Build assignment-style bed event summary."""
 
     longest_out = 0.0
+    current_out = 0.0
 
     for segment in timeline.get("segments", []):
         if segment.get("bed_occupancy") == "OUT_OF_BED":
+            current_out += float(
+                segment.get("duration_sec", 0.0)
+            )
             longest_out = max(
                 longest_out,
-                float(segment.get("duration_sec", 0.0)),
+                current_out,
             )
+        else:
+            current_out = 0.0
 
     return {
         **timeline.get("bed_summary", {}),
