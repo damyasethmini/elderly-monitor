@@ -1,0 +1,62 @@
+{
+  "annotation_version": "step7_ground_truth_v1",
+  "video": "timeline",
+  "observation_duration_sec": 23.0,
+  "states": [
+    {
+      "start_sec": 0.0,
+      "end_sec": 0.5,
+      "activity": "UNKNOWN",
+      "bed_occupancy": "UNKNOWN",
+      "note": "Replace UNKNOWN values with manually reviewed ground truth."
+    },
+    {
+      "start_sec": 0.5,
+      "end_sec": 1.5,
+      "activity": "UNKNOWN",
+      "bed_occupancy": "UNKNOWN",
+      "note": "Replace UNKNOWN values with manually reviewed ground truth."
+    },
+    {
+      "start_sec": 1.5,
+      "end_sec": 3.0,
+      "activity": "UNKNOWN",
+      "bed_occupancy": "UNKNOWN",
+      "note": "Replace UNKNOWN values with manually reviewed ground truth."
+    },
+    {
+      "start_sec": 3.0,
+      "end_sec": 14.0,
+      "activity": "UNKNOWN",
+      "bed_occupancy": "UNKNOWN",
+      "note": "Replace UNKNOWN values with manually reviewed ground truth."
+    },
+    {
+      "start_sec": 14.0,
+      "end_sec": 14.5,
+      "activity": "UNKNOWN",
+      "bed_occupancy": "UNKNOWN",
+      "note": "Replace UNKNOWN values with manually reviewed ground truth."
+    },
+    {
+      "start_sec": 14.5,
+      "end_sec": 21.5,
+      "activity": "UNKNOWN",
+      "bed_occupancy": "UNKNOWN",
+      "note": "Replace UNKNOWN values with manually reviewed ground truth."
+    },
+    {
+      "start_sec": 21.5,
+      "end_sec": 23.0,
+      "activity": "UNKNOWN",
+      "bed_occupancy": "UNKNOWN",
+      "note": "Replace UNKNOWN values with manually reviewed ground truth."
+    }
+  ],
+  "bed_events": [],
+  "notes": [
+    "Ground truth should be manually annotated from the source video, not copied from the prediction.",
+    "Use UNKNOWN when the video does not provide enough evidence.",
+    "OUT_OF_BED is represented through bed_occupancy so primary activity durations remain mutually exclusive."
+  ]
+}
