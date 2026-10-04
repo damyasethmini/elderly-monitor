@@ -1,8 +1,12 @@
 """Step 5: local, evidence-grounded agentic analysis for elderly monitoring.
 
-This module performs a deterministic agent workflow over the Step 4 timeline and
-bed-event JSON. It selects additional context checks when an event is ambiguous,
-then applies configurable safety rules. It requires no hosted LLM or paid API.
+The agent is implemented as a LangGraph StateGraph when LangGraph is installed.
+It is intentionally local and deterministic: there is no hosted LLM or paid API.
+The graph decides whether more temporal context is needed before checking spatial
+and movement evidence, then produces a safety-oriented NORMAL/MONITOR/ALERT result.
+
+The public ``analyze_timeline_and_events`` function keeps the Step 5 API used by
+later steps and the CLI.
 """
 
 from __future__ import annotations
@@ -11,12 +15,22 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, TypedDict
 
 try:
     import yaml
-except ImportError:  # pragma: no cover - project dependencies normally include PyYAML
+except ImportError:  # pragma: no cover
     yaml = None
+
+try:
+    from langgraph.graph import END, START, StateGraph
+
+    LANGGRAPH_AVAILABLE = True
+except ImportError:  # pragma: no cover - fallback keeps local tests runnable
+    END = "__end__"
+    START = "__start__"
+    StateGraph = None
+    LANGGRAPH_AVAILABLE = False
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 IN_BED_ACTIVITIES = {"LYING_IN_BED", "SITTING_ON_BED"}
@@ -32,8 +46,38 @@ DEFAULT_ALERTS: dict[str, float] = {
 }
 
 
+class EventAgentState(TypedDict, total=False):
+    """Shared state passed between LangGraph nodes for one bed event."""
+
+    event: dict[str, Any]
+    segments: list[dict[str, Any]]
+    alerts: dict[str, float]
+    movement_threshold: float
+    event_index: int | None
+    previous: dict[str, Any] | None
+    current: dict[str, Any] | None
+    following: list[dict[str, Any]]
+    context_segments: list[dict[str, Any]]
+    previous_activity: str | None
+    current_activity: str
+    following_activities: list[str]
+    previous_in_bed: bool
+    has_following_out_of_bed: bool
+    context_is_ambiguous: bool
+    spatial_known: bool
+    inside_seen: bool
+    outside_seen: bool
+    movement_norm: float
+    movement_supports_exit: bool
+    actions: list[dict[str, Any]]
+    reasons: list[str]
+    decision: str
+    context_support: str
+    requires_human_review: bool
+    confidence: float | None
+
+
 def _number(value: Any, default: float = 0.0) -> float:
-    """Convert a JSON-like value to float without raising on missing data."""
     try:
         if value is None or value == "":
             return default
@@ -51,10 +95,8 @@ def _segment_activity(segment: dict[str, Any]) -> str:
     return str(segment.get("activity", "UNKNOWN")).upper()
 
 
-def _segment_at_time(
-    segments: list[dict[str, Any]], timestamp: float
-) -> int | None:
-    """Find the segment containing timestamp; tolerate endpoint rounding."""
+def _segment_at_time(segments: list[dict[str, Any]], timestamp: float) -> int | None:
+    """Find the timeline segment containing a timestamp; tolerate endpoint rounding."""
     for index, segment in enumerate(segments):
         start = _number(segment.get("start_sec"), -1.0)
         end = _number(segment.get("end_sec"), -1.0)
@@ -74,23 +116,19 @@ def _duration_of_contiguous_activity(
     for segment in segments:
         if _segment_activity(segment) in activities:
             duration = max(0.0, _number(segment.get("duration_sec")))
-            # If duration is absent, derive it from segment endpoints.
             if duration == 0.0:
                 duration = max(
                     0.0,
-                    _number(segment.get("end_sec"))
-                    - _number(segment.get("start_sec")),
+                    _number(segment.get("end_sec")) - _number(segment.get("start_sec")),
                 )
             current += duration
             longest = max(longest, current)
         else:
-            # UNKNOWN and other states break a confirmed continuous episode.
             current = 0.0
     return round(longest, 3)
 
 
 def _context_snapshot(segment: dict[str, Any]) -> dict[str, Any]:
-    """Keep useful evidence in the output without copying raw observations."""
     keys = (
         "activity",
         "bed_occupancy",
@@ -107,10 +145,8 @@ def _context_snapshot(segment: dict[str, Any]) -> dict[str, Any]:
     return {key: segment.get(key) for key in keys if key in segment}
 
 
-def _spatial_evidence(
-    segments: list[dict[str, Any]],
-) -> tuple[bool, bool, bool]:
-    """Return (known, inside_bed_seen, outside_bed_seen) for these segments."""
+def _spatial_evidence(segments: list[dict[str, Any]]) -> tuple[bool, bool, bool]:
+    """Return (known, inside_bed_seen, outside_bed_seen)."""
     inside_seen = False
     outside_seen = False
     known = False
@@ -127,9 +163,7 @@ def _spatial_evidence(
     return known, inside_seen, outside_seen
 
 
-def _make_action(
-    action: str, status: str, finding: str, **details: Any
-) -> dict[str, Any]:
+def _make_action(action: str, status: str, finding: str, **details: Any) -> dict[str, Any]:
     item: dict[str, Any] = {
         "action": action,
         "status": status,
@@ -140,49 +174,62 @@ def _make_action(
     return item
 
 
-def _analyze_event(
-    event: dict[str, Any],
-    segments: list[dict[str, Any]],
-    alerts: dict[str, float],
-    movement_threshold: float,
-) -> dict[str, Any]:
-    event_id = str(event.get("event_id", "event_unknown"))
-    event_type = str(event.get("event_type", "UNKNOWN")).upper()
+def _node_locate_event(state: EventAgentState) -> dict[str, Any]:
+    event = state["event"]
+    segments = state["segments"]
     event_time = _number(
         event.get("start_time_sec"),
         _number(event.get("confirmed_time_sec")),
     )
     event_index = _segment_at_time(segments, event_time)
-    actions: list[dict[str, Any]] = []
-    reasons: list[str] = []
+    actions = list(state.get("actions", []))
+    if event_index is None:
+        actions.append(
+            _make_action(
+                "LOCATE_EVENT_IN_TIMELINE",
+                "UNCERTAIN",
+                "The event timestamp did not match any timeline segment.",
+                event_time_sec=event_time,
+            )
+        )
+    else:
+        actions.append(
+            _make_action(
+                "LOCATE_EVENT_IN_TIMELINE",
+                "FOUND",
+                f"Event aligned to timeline segment {event_index}.",
+                event_time_sec=event_time,
+                segment_index=event_index,
+            )
+        )
+    return {"event_index": event_index, "actions": actions}
+
+
+def _node_inspect_temporal_context(state: EventAgentState) -> dict[str, Any]:
+    event = state["event"]
+    segments = state["segments"]
+    event_index = state.get("event_index")
+    actions = list(state.get("actions", []))
 
     if event_index is None:
-        actions.append(_make_action(
-            "LOCATE_EVENT_IN_TIMELINE", "UNCERTAIN",
-            "The event timestamp did not match any timeline segment.",
-            event_time_sec=event_time,
-        ))
         return {
-            "event_id": event_id,
-            "event_type": event_type,
-            "decision": "MONITOR",
-            "context_support": "WEAK",
-            "confidence": (
-            round(_number(event.get("confidence")), 3)
-            if event.get("confidence") is not None else None
-        ),
-            "requires_human_review": True,
-            "reasons": ["Event could not be aligned to the activity timeline."],
-            "agent_actions": actions,
+            "previous": None,
+            "current": None,
+            "following": [],
             "context_segments": [],
+            "previous_activity": None,
+            "current_activity": "UNKNOWN",
+            "following_activities": [],
+            "previous_in_bed": False,
+            "has_following_out_of_bed": False,
+            "context_is_ambiguous": True,
+            "actions": actions,
         }
 
     previous = segments[event_index - 1] if event_index > 0 else None
     current = segments[event_index]
-    # Inspect the candidate segment and the next two segments to see whether
-    # the activity continues in the direction suggested by the event.
     nearby_end = min(len(segments), event_index + 3)
-    nearby = segments[max(0, event_index - 1):nearby_end]
+    nearby = segments[max(0, event_index - 1) : nearby_end]
     following = segments[event_index:nearby_end]
 
     previous_activity = _segment_activity(previous) if previous else None
@@ -192,60 +239,142 @@ def _analyze_event(
         activity in OUT_OF_BED_ACTIVITIES for activity in following_activities
     )
     previous_in_bed = previous_activity in IN_BED_ACTIVITIES if previous_activity else False
-
-    actions.append(_make_action(
-        "INSPECT_PREVIOUS_SEGMENT",
-        "FOUND" if previous else "MISSING",
-        (
-            f"Previous activity was {previous_activity}."
-            if previous_activity
-            else "The event is at the beginning of the timeline; no previous segment exists."
-        ),
-        previous_activity=previous_activity,
-    ))
-    actions.append(_make_action(
-        "INSPECT_FOLLOWING_SEGMENTS",
-        "FOUND" if following else "MISSING",
-        "Following context: " + ", ".join(following_activities),
-        following_activities=following_activities,
-    ))
+    event_type = str(event.get("event_type", "UNKNOWN")).upper()
 
     context_is_ambiguous = (
         previous is None
         or previous_activity == "UNKNOWN"
         or current_activity == "UNKNOWN"
-        or not has_following_out_of_bed and event_type == "BED_EXIT"
+        or (not has_following_out_of_bed and event_type == "BED_EXIT")
         or event.get("evidence_strength") == "TRANSITION_ONLY"
     )
-    context_segments = nearby
-    if context_is_ambiguous:
-        # The agent responds to ambiguity by widening the temporal window.
-        context_segments = segments[max(0, event_index - 3):min(len(segments), event_index + 5)]
-        actions.append(_make_action(
-            "EXPAND_TEMPORAL_CONTEXT", "EXECUTED",
-            "Initial context was ambiguous; inspected a wider window of timeline segments.",
-            segment_count=len(context_segments),
-        ))
 
+    actions.append(
+        _make_action(
+            "INSPECT_PREVIOUS_SEGMENT",
+            "FOUND" if previous else "MISSING",
+            (
+                f"Previous activity was {previous_activity}."
+                if previous_activity
+                else "No previous timeline segment exists."
+            ),
+            previous_activity=previous_activity,
+        )
+    )
+    actions.append(
+        _make_action(
+            "INSPECT_FOLLOWING_SEGMENTS",
+            "FOUND" if following else "MISSING",
+            "Following context: " + (", ".join(following_activities) or "none"),
+            following_activities=following_activities,
+        )
+    )
+
+    return {
+        "previous": previous,
+        "current": current,
+        "following": following,
+        "context_segments": nearby,
+        "previous_activity": previous_activity,
+        "current_activity": current_activity,
+        "following_activities": following_activities,
+        "previous_in_bed": previous_in_bed,
+        "has_following_out_of_bed": has_following_out_of_bed,
+        "context_is_ambiguous": context_is_ambiguous,
+        "actions": actions,
+    }
+
+
+def _route_context(state: EventAgentState) -> Literal["expand", "spatial"]:
+    if state.get("context_is_ambiguous", True):
+        return "expand"
+    return "spatial"
+
+
+def _node_expand_temporal_context(state: EventAgentState) -> dict[str, Any]:
+    segments = state["segments"]
+    event_index = state.get("event_index")
+    actions = list(state.get("actions", []))
+    if event_index is None:
+        return {"context_segments": [], "actions": actions}
+    context_segments = segments[max(0, event_index - 3) : min(len(segments), event_index + 5)]
+    actions.append(
+        _make_action(
+            "EXPAND_TEMPORAL_CONTEXT",
+            "EXECUTED",
+            "Initial event context was ambiguous; inspected a wider temporal window.",
+            segment_count=len(context_segments),
+            lookback_segments=3,
+            lookahead_segments=4,
+        )
+    )
+    return {"context_segments": context_segments, "actions": actions}
+
+
+def _node_check_spatial_and_movement(state: EventAgentState) -> dict[str, Any]:
+    event = state["event"]
+    context_segments = state.get("context_segments", [])
+    movement_threshold = state["movement_threshold"]
     spatial_known, inside_seen, outside_seen = _spatial_evidence(context_segments)
     movement_norm = _number(event.get("movement_away_from_bed_norm"), -1.0)
     movement_supports_exit = movement_norm >= movement_threshold
-    actions.append(_make_action(
-        "CHECK_BED_REGION_AND_MOVEMENT",
-        "SUPPORTED" if outside_seen or movement_supports_exit else (
-            "INSIDE_ONLY" if inside_seen else "INSUFFICIENT"
-        ),
-        (
-            "Spatial or movement evidence supports movement away from the bed."
-            if outside_seen or movement_supports_exit
-            else "No positive evidence of movement away from the bed was found in the event context."
-        ),
-        spatial_evidence_known=spatial_known,
-        bed_region_inside_seen=inside_seen,
-        bed_region_outside_seen=outside_seen,
-        movement_away_from_bed_norm=(movement_norm if movement_norm >= 0 else None),
-        movement_threshold=movement_threshold,
-    ))
+
+    actions = list(state.get("actions", []))
+    status = "SUPPORTED" if outside_seen or movement_supports_exit else (
+        "INSIDE_ONLY" if inside_seen else "INSUFFICIENT"
+    )
+    finding = (
+        "Spatial or movement evidence supports movement away from the bed."
+        if outside_seen or movement_supports_exit
+        else "No positive evidence of movement away from the bed was found in the event context."
+    )
+    actions.append(
+        _make_action(
+            "CHECK_BED_REGION_AND_MOVEMENT",
+            status,
+            finding,
+            spatial_evidence_known=spatial_known,
+            bed_region_inside_seen=inside_seen,
+            bed_region_outside_seen=outside_seen,
+            movement_away_from_bed_norm=movement_norm if movement_norm >= 0 else None,
+            movement_threshold=movement_threshold,
+        )
+    )
+
+    return {
+        "spatial_known": spatial_known,
+        "inside_seen": inside_seen,
+        "outside_seen": outside_seen,
+        "movement_norm": movement_norm,
+        "movement_supports_exit": movement_supports_exit,
+        "actions": actions,
+    }
+
+
+def _node_decide_event(state: EventAgentState) -> dict[str, Any]:
+    event = state["event"]
+    event_type = str(event.get("event_type", "UNKNOWN")).upper()
+    previous_activity = state.get("previous_activity")
+    current_activity = state.get("current_activity", "UNKNOWN")
+    following_activities = state.get("following_activities", [])
+    previous_in_bed = bool(state.get("previous_in_bed"))
+    has_following_out_of_bed = bool(state.get("has_following_out_of_bed"))
+    inside_seen = bool(state.get("inside_seen"))
+    outside_seen = bool(state.get("outside_seen"))
+    spatial_known = bool(state.get("spatial_known"))
+    movement_supports_exit = bool(state.get("movement_supports_exit"))
+    alerts = state["alerts"]
+    actions = list(state.get("actions", []))
+    reasons: list[str] = []
+
+    if state.get("event_index") is None:
+        return {
+            "decision": "MONITOR",
+            "context_support": "WEAK",
+            "requires_human_review": True,
+            "reasons": ["Event could not be aligned to the activity timeline."],
+            "actions": actions,
+        }
 
     decision = _decision(event.get("decision"), "MONITOR")
     requires_review = False
@@ -259,7 +388,11 @@ def _analyze_event(
         else:
             context_support = "WEAK"
             requires_review = True
-            decision = "MONITOR" if DECISION_RANK[decision] < DECISION_RANK["MONITOR"] else decision
+            decision = (
+                "MONITOR"
+                if DECISION_RANK[decision] < DECISION_RANK["MONITOR"]
+                else decision
+            )
             reasons.append(
                 "The detected bed exit lacks one or more expected context signals; human review is recommended."
             )
@@ -271,29 +404,30 @@ def _analyze_event(
                 "The continuous out-of-bed episode meets the configured ALERT duration threshold."
             )
         elif episode_duration >= alerts["prolonged_out_of_bed_monitor_sec"]:
-            if DECISION_RANK[decision] < DECISION_RANK["MONITOR"]:
-                decision = "MONITOR"
+            decision = max(
+                [decision, "MONITOR"], key=lambda item: DECISION_RANK[item]
+            )
             reasons.append(
                 "The continuous out-of-bed episode meets the configured MONITOR duration threshold."
             )
         elif DECISION_RANK[decision] < DECISION_RANK["MONITOR"]:
-            # A confirmed departure remains visible to the monitoring layer even
-            # when it is too short to trigger a prolonged-absence threshold.
             decision = "MONITOR"
             reasons.append("A confirmed bed exit is recorded for monitoring.")
 
     elif event_type == "BED_RETURN":
         has_in_bed_after = any(
-            _segment_activity(item) in IN_BED_ACTIVITIES for item in following
+            _segment_activity(item) in IN_BED_ACTIVITIES for item in state.get("following", [])
         )
-        if previous_activity in OUT_OF_BED_ACTIVITIES and has_in_bed_after and (inside_seen or spatial_known is False):
-            reasons.append("The timeline supports a transition from outside the bed back to an in-bed posture.")
+        if previous_activity in OUT_OF_BED_ACTIVITIES and has_in_bed_after and inside_seen:
+            reasons.append(
+                "The timeline supports a transition from outside the bed back to an in-bed posture."
+            )
             context_support = "STRONG"
         else:
             decision = "MONITOR"
             context_support = "WEAK"
             requires_review = True
-            reasons.append("Return context is incomplete or lacks positive in-bed evidence.")
+            reasons.append("Return context is incomplete or lacks positive in-bed spatial evidence.")
 
     else:
         decision = "MONITOR"
@@ -301,43 +435,141 @@ def _analyze_event(
         requires_review = True
         reasons.append(f"Unsupported event type {event_type}; review the event manually.")
 
-    # A reported ALERT decision is never downgraded by the contextual layer.
     if _decision(event.get("decision"), "NORMAL") == "ALERT":
         decision = "ALERT"
-        reasons.append("The upstream event detector already marked this event ALERT; escalation is preserved.")
+        reasons.append(
+            "The upstream event detector already marked this event ALERT; escalation is preserved."
+        )
 
-    # Preserve the upstream detector's confidence. Context support is reported
-    # separately so this stage does not manufacture a new probability.
+    actions.append(
+        _make_action(
+            "MAKE_EVENT_DECISION",
+            decision,
+            "Applied the event-specific temporal, spatial, movement and duration rules.",
+            decision=decision,
+            context_support=context_support,
+            requires_human_review=requires_review,
+        )
+    )
+
     confidence = (
         round(_number(event.get("confidence")), 3)
-        if event.get("confidence") is not None else None
+        if event.get("confidence") is not None
+        else None
     )
+    return {
+        "decision": decision,
+        "context_support": context_support,
+        "requires_human_review": requires_review,
+        "reasons": reasons,
+        "actions": actions,
+        "confidence": confidence,
+    }
+
+
+def _fallback_event_agent(state: EventAgentState) -> EventAgentState:
+    """Run the same node logic sequentially if LangGraph is unavailable."""
+    state = {**state, **_node_locate_event(state)}
+    state = {**state, **_node_inspect_temporal_context(state)}
+    if _route_context(state) == "expand":
+        state = {**state, **_node_expand_temporal_context(state)}
+    state = {**state, **_node_check_spatial_and_movement(state)}
+    state = {**state, **_node_decide_event(state)}
+    return state
+
+
+def _build_event_agent_graph() -> Any | None:
+    """Build and compile the LangGraph StateGraph used for one event."""
+    if not LANGGRAPH_AVAILABLE or StateGraph is None:
+        return None
+
+    builder = StateGraph(EventAgentState)
+    builder.add_node("locate_event", _node_locate_event)
+    builder.add_node("inspect_temporal_context", _node_inspect_temporal_context)
+    builder.add_node("expand_temporal_context", _node_expand_temporal_context)
+    builder.add_node("check_spatial_and_movement", _node_check_spatial_and_movement)
+    builder.add_node("decide_event", _node_decide_event)
+
+    builder.add_edge(START, "locate_event")
+    builder.add_edge("locate_event", "inspect_temporal_context")
+    builder.add_conditional_edges(
+        "inspect_temporal_context",
+        _route_context,
+        {"expand": "expand_temporal_context", "spatial": "check_spatial_and_movement"},
+    )
+    builder.add_edge("expand_temporal_context", "check_spatial_and_movement")
+    builder.add_edge("check_spatial_and_movement", "decide_event")
+    builder.add_edge("decide_event", END)
+    return builder.compile()
+
+
+def _run_event_agent(
+    event: dict[str, Any],
+    segments: list[dict[str, Any]],
+    alerts: dict[str, float],
+    movement_threshold: float,
+) -> dict[str, Any]:
+    initial_state: EventAgentState = {
+        "event": event,
+        "segments": segments,
+        "alerts": alerts,
+        "movement_threshold": movement_threshold,
+        "actions": [],
+    }
+
+    graph = _build_event_agent_graph()
+    if graph is not None:
+        final_state = graph.invoke(initial_state)
+        framework = "langgraph_stategraph"
+    else:
+        final_state = _fallback_event_agent(initial_state)
+        framework = "deterministic_fallback_without_langgraph"
+
+    event_type = str(event.get("event_type", "UNKNOWN")).upper()
+    event_id = str(event.get("event_id", "event_unknown"))
+    event_time = _number(
+        event.get("start_time_sec"),
+        _number(event.get("confirmed_time_sec")),
+    )
+    confidence = final_state.get("confidence")
+    if confidence is None and event.get("confidence") is not None:
+        confidence = round(_number(event.get("confidence")), 3)
 
     return {
         "event_id": event_id,
         "event_type": event_type,
         "start_time_sec": round(event_time, 3),
         "confirmed_time_sec": event.get("confirmed_time_sec"),
-        "decision": decision,
-        "context_support": context_support,
-        "confidence": round(confidence, 3),
-        "requires_human_review": requires_review,
-        "reasons": reasons,
+        "decision": _decision(final_state.get("decision"), "MONITOR"),
+        "context_support": final_state.get("context_support", "WEAK"),
+        "confidence": confidence,
+        "requires_human_review": bool(final_state.get("requires_human_review", True)),
+        "reasons": list(final_state.get("reasons", [])),
         "findings": {
-            "previous_activity": previous_activity,
-            "event_segment_activity": current_activity,
-            "following_activities": following_activities,
-            "previous_activity_was_in_bed": previous_in_bed,
-            "following_context_contains_out_of_bed_activity": has_following_out_of_bed,
-            "bed_region_spatial_evidence_known": spatial_known,
-            "bed_region_inside_seen": inside_seen,
-            "bed_region_outside_seen": outside_seen,
-            "movement_away_from_bed_norm": movement_norm if movement_norm >= 0 else None,
+            "previous_activity": final_state.get("previous_activity"),
+            "event_segment_activity": final_state.get("current_activity", "UNKNOWN"),
+            "following_activities": list(final_state.get("following_activities", [])),
+            "previous_activity_was_in_bed": bool(final_state.get("previous_in_bed", False)),
+            "following_context_contains_out_of_bed_activity": bool(
+                final_state.get("has_following_out_of_bed", False)
+            ),
+            "bed_region_spatial_evidence_known": bool(final_state.get("spatial_known", False)),
+            "bed_region_inside_seen": bool(final_state.get("inside_seen", False)),
+            "bed_region_outside_seen": bool(final_state.get("outside_seen", False)),
+            "movement_away_from_bed_norm": (
+                final_state.get("movement_norm")
+                if _number(final_state.get("movement_norm"), -1.0) >= 0
+                else None
+            ),
             "movement_threshold": movement_threshold,
             "out_of_bed_duration_sec": _number(event.get("out_of_bed_duration_sec")),
         },
-        "agent_actions": actions,
-        "context_segments": [_context_snapshot(item) for item in context_segments],
+        "agent_actions": list(final_state.get("actions", [])),
+        "context_segments": [
+            _context_snapshot(item)
+            for item in final_state.get("context_segments", [])
+        ],
+        "agent_framework": framework,
     }
 
 
@@ -347,7 +579,7 @@ def analyze_timeline_and_events(
     alerts_config: dict[str, Any] | None = None,
     movement_threshold: float = 0.15,
 ) -> dict[str, Any]:
-    """Run Step 5 contextual checks and return a JSON-serializable report."""
+    """Run Step 5 agentic contextual checks and return a JSON-serializable report."""
     segments = timeline.get("segments")
     if not isinstance(segments, list):
         raise ValueError("Timeline JSON must contain a list named 'segments'.")
@@ -359,8 +591,6 @@ def analyze_timeline_and_events(
         for key in alerts:
             if key in alerts_config:
                 alerts[key] = max(0.0, _number(alerts_config[key], alerts[key]))
-
-    # Avoid silently applying contradictory duration thresholds.
     if alerts["prolonged_out_of_bed_alert_sec"] < alerts["prolonged_out_of_bed_monitor_sec"]:
         alerts["prolonged_out_of_bed_alert_sec"] = alerts["prolonged_out_of_bed_monitor_sec"]
 
@@ -369,7 +599,7 @@ def analyze_timeline_and_events(
         raise ValueError("Bed events JSON must contain a list named 'events'.")
 
     event_analyses = [
-        _analyze_event(event, segments, alerts, movement_threshold)
+        _run_event_agent(event, segments, alerts, movement_threshold)
         for event in source_events
         if isinstance(event, dict)
     ]
@@ -379,7 +609,9 @@ def analyze_timeline_and_events(
         _duration_of_contiguous_activity(segments, OUT_OF_BED_ACTIVITIES),
     )
     longest_unknown = _duration_of_contiguous_activity(segments, {"UNKNOWN"})
-    longest_sitting_on_bed = _duration_of_contiguous_activity(segments, {"SITTING_ON_BED"})
+    longest_sitting_on_bed = _duration_of_contiguous_activity(
+        segments, {"SITTING_ON_BED"}
+    )
     observation_duration = _number(
         timeline.get("observation_duration_sec"),
         _number(timeline.get("duration_sec")),
@@ -436,9 +668,7 @@ def analyze_timeline_and_events(
             ),
         })
 
-    # Inspect lying postures against the bed polygon. A mismatch is uncertain
-    # safety evidence, not proof of a fall, so it raises MONITOR for review.
-    for index, segment in enumerate(segments):
+    for segment in segments:
         if _segment_activity(segment) != "LYING_IN_BED":
             continue
         spatial_known, inside_seen, outside_seen = _spatial_evidence([segment])
@@ -464,9 +694,12 @@ def analyze_timeline_and_events(
     else:
         decision_reasons.append("No configured monitoring or alert condition was triggered by the available evidence.")
 
-    return {
-        "analysis_version": "step5_local_agent_v1",
-        "analysis_method": "deterministic_agentic_context_checks",
+    agent_frameworks = sorted({item["agent_framework"] for item in event_analyses if "agent_framework" in item})
+    report = {
+        "analysis_version": "step5_langgraph_agent_v2",
+        "analysis_method": "langgraph_stategraph_deterministic_context_checks" if LANGGRAPH_AVAILABLE else "deterministic_fallback_context_checks",
+        "agent_framework": "LangGraph StateGraph" if LANGGRAPH_AVAILABLE else "Deterministic fallback (LangGraph not installed)",
+        "uses_langgraph": LANGGRAPH_AVAILABLE,
         "uses_external_llm_api": False,
         "observation_duration_sec": round(observation_duration, 3),
         "overall_decision": overall_decision,
@@ -483,10 +716,13 @@ def analyze_timeline_and_events(
         "observation_flags": observation_flags,
         "event_analyses": event_analyses,
         "note": (
-            "This local agent selects temporal/spatial checks using explicit rules. "
-            "It is not a diagnosis and does not prove a fall; uncertain cases should be reviewed."
+            "The Step 5 agent uses LangGraph for conditional orchestration and explicit Python safety rules. "
+            "It does not call an external LLM and does not diagnose medical conditions."
         ),
     }
+    if agent_frameworks:
+        report["event_agent_frameworks"] = agent_frameworks
+    return report
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -524,7 +760,7 @@ def _load_alert_config(config_path: Path | None) -> tuple[dict[str, Any], float]
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run Step 5 local agentic contextual analysis on Step 4 outputs."
+        description="Run Step 5 LangGraph agentic contextual analysis on Step 4 outputs."
     )
     parser.add_argument(
         "--video",
@@ -561,7 +797,10 @@ def main(argv: list[str] | None = None) -> int:
     for path in (timeline_path, events_path):
         if not path.is_file():
             print(f"ERROR: Required Step 4 output not found: {path}", file=sys.stderr)
-            print("Run Step 4 first: python -m src.main --events-video <video>", file=sys.stderr)
+            print(
+                "Run Step 4 first: python -m src.main --events-video <video>",
+                file=sys.stderr,
+            )
             return 2
 
     if not output_path.is_absolute():
@@ -590,14 +829,18 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     print("\nStep 5 agentic analysis completed.")
+    print(f"Agent framework: {report['agent_framework']}")
+    print(f"External LLM API: {report['uses_external_llm_api']}")
     print(f"Overall decision: {report['overall_decision']}")
     print(f"Bed exits analyzed: {report['summary']['bed_exit_count']}")
     print(f"Bed returns analyzed: {report['summary']['bed_return_count']}")
     print(f"Observation flags: {len(report['observation_flags'])}")
     for item in report["event_analyses"]:
+        confidence = item["confidence"]
+        confidence_text = f"{confidence:.2f}" if isinstance(confidence, (float, int)) else "n/a"
         print(
             f"  {item['event_type']} {item['event_id']}: {item['decision']} "
-            f"(context={item['context_support']}, confidence={item['confidence']:.2f})"
+            f"(context={item['context_support']}, confidence={confidence_text})"
         )
     print(f"Analysis file: {output_path}")
     return 0
