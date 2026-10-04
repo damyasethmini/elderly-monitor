@@ -1,35 +1,42 @@
-# Python
+# Python environment
+venv/
+.venv/
+
+# Python cache
 __pycache__/
 *.py[cod]
-*.pyd
-.Python
-.venv/
-venv/
-.env
-/venv
+.pytest_cache/
+.mypy_cache/
 
-# Editors / OS
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# IDE
 .vscode/
 .idea/
+
+# OS files
 .DS_Store
 Thumbs.db
 
-# Generated outputs and model weights
-runs/
-results/*
-!results/.gitkeep
+# Model weights - downloaded automatically by Ultralytics
 *.pt
 *.onnx
 *.engine
 
-# Keep folder placeholders but do not commit private/test video data by default
-# Remove these ignore rules if you intentionally want to version small test assets.
-data/videos/*
-!data/videos/.gitkeep
-data/ground_truth/*
-!data/ground_truth/.gitkeep
-data/bed_regions/*
-!data/bed_regions/.gitkeep
+# Raw videos - large files, not required in Git
+data/videos/*.mp4
+data/videos/*.avi
+data/videos/*.mov
+data/videos/*.mkv
 
+# Large generated frame outputs
+results/**/frames/
+results/**/pose/annotated/
+results/**/pose/observations/
 
-*.mp4
+# Temporary/log files
+*.log
+*.tmp

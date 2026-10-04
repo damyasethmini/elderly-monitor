@@ -1,0 +1,173 @@
+{
+  "analysis_version": "step5_langgraph_agent_v2",
+  "analysis_method": "langgraph_stategraph_deterministic_context_checks",
+  "agent_framework": "LangGraph StateGraph",
+  "uses_langgraph": true,
+  "uses_external_llm_api": false,
+  "observation_duration_sec": 23.0,
+  "overall_decision": "MONITOR",
+  "decision_reasons": [
+    "A confirmed event or an uncertainty/monitoring condition requires attention."
+  ],
+  "thresholds": {
+    "sitting_on_bed_edge_monitor_sec": 120.0,
+    "prolonged_out_of_bed_monitor_sec": 300.0,
+    "prolonged_out_of_bed_alert_sec": 600.0,
+    "unknown_state_monitor_sec": 30.0
+  },
+  "summary": {
+    "bed_exit_count": 1,
+    "bed_return_count": 0,
+    "longest_continuous_out_of_bed_sec": 7.5,
+    "longest_continuous_unknown_sec": 1.5,
+    "longest_continuous_sitting_on_bed_sec": 11.0,
+    "timeline_final_state": "UNKNOWN"
+  },
+  "observation_flags": [],
+  "event_analyses": [
+    {
+      "event_id": "bed_exit_001",
+      "event_type": "BED_EXIT",
+      "start_time_sec": 14.0,
+      "confirmed_time_sec": 15.5,
+      "decision": "MONITOR",
+      "context_support": "STRONG",
+      "confidence": 0.796,
+      "requires_human_review": false,
+      "reasons": [
+        "Temporal sequence and spatial/movement evidence corroborate the bed exit."
+      ],
+      "findings": {
+        "previous_activity": "SITTING_ON_BED",
+        "event_segment_activity": "WALKING",
+        "following_activities": [
+          "WALKING",
+          "STANDING",
+          "UNKNOWN"
+        ],
+        "previous_activity_was_in_bed": true,
+        "following_context_contains_out_of_bed_activity": true,
+        "bed_region_spatial_evidence_known": true,
+        "bed_region_inside_seen": true,
+        "bed_region_outside_seen": true,
+        "movement_away_from_bed_norm": 0.7296,
+        "movement_threshold": 0.15,
+        "out_of_bed_duration_sec": 7.5
+      },
+      "agent_actions": [
+        {
+          "action": "LOCATE_EVENT_IN_TIMELINE",
+          "status": "FOUND",
+          "finding": "Event aligned to timeline segment 4.",
+          "details": {
+            "event_time_sec": 14.0,
+            "segment_index": 4
+          }
+        },
+        {
+          "action": "INSPECT_PREVIOUS_SEGMENT",
+          "status": "FOUND",
+          "finding": "Previous activity was SITTING_ON_BED.",
+          "details": {
+            "previous_activity": "SITTING_ON_BED"
+          }
+        },
+        {
+          "action": "INSPECT_FOLLOWING_SEGMENTS",
+          "status": "FOUND",
+          "finding": "Following context: WALKING, STANDING, UNKNOWN",
+          "details": {
+            "following_activities": [
+              "WALKING",
+              "STANDING",
+              "UNKNOWN"
+            ]
+          }
+        },
+        {
+          "action": "CHECK_BED_REGION_AND_MOVEMENT",
+          "status": "SUPPORTED",
+          "finding": "Spatial or movement evidence supports movement away from the bed.",
+          "details": {
+            "spatial_evidence_known": true,
+            "bed_region_inside_seen": true,
+            "bed_region_outside_seen": true,
+            "movement_away_from_bed_norm": 0.7296,
+            "movement_threshold": 0.15
+          }
+        },
+        {
+          "action": "MAKE_EVENT_DECISION",
+          "status": "MONITOR",
+          "finding": "Applied the event-specific temporal, spatial, movement and duration rules.",
+          "details": {
+            "decision": "MONITOR",
+            "context_support": "STRONG",
+            "requires_human_review": false
+          }
+        }
+      ],
+      "context_segments": [
+        {
+          "activity": "SITTING_ON_BED",
+          "bed_occupancy": "IN_BED",
+          "start_sec": 3.0,
+          "end_sec": 14.0,
+          "duration_sec": 11.0,
+          "mean_confidence": 0.7935,
+          "bed_region_inside_at_start": true,
+          "bed_region_inside_at_end": true,
+          "bed_region_contains_outside_point": false,
+          "movement_away_from_bed_norm": 0.0,
+          "max_distance_from_bed_px": 0.0
+        },
+        {
+          "activity": "WALKING",
+          "bed_occupancy": "OUT_OF_BED",
+          "start_sec": 14.0,
+          "end_sec": 14.5,
+          "duration_sec": 0.5,
+          "mean_confidence": 0.6,
+          "bed_region_inside_at_start": false,
+          "bed_region_inside_at_end": false,
+          "bed_region_contains_outside_point": true,
+          "movement_away_from_bed_norm": 0.0,
+          "max_distance_from_bed_px": 117.599
+        },
+        {
+          "activity": "STANDING",
+          "bed_occupancy": "OUT_OF_BED",
+          "start_sec": 14.5,
+          "end_sec": 21.5,
+          "duration_sec": 7.0,
+          "mean_confidence": 0.56,
+          "bed_region_inside_at_start": false,
+          "bed_region_inside_at_end": false,
+          "bed_region_contains_outside_point": true,
+          "movement_away_from_bed_norm": 0.6114,
+          "max_distance_from_bed_px": 712.984
+        },
+        {
+          "activity": "UNKNOWN",
+          "bed_occupancy": "UNKNOWN",
+          "start_sec": 21.5,
+          "end_sec": 23.0,
+          "duration_sec": 1.5,
+          "mean_confidence": 0.0,
+          "bed_region_inside_at_start": false,
+          "bed_region_inside_at_end": false,
+          "bed_region_contains_outside_point": true,
+          "movement_away_from_bed_norm": 0.0,
+          "max_distance_from_bed_px": 925.774
+        }
+      ],
+      "agent_framework": "langgraph_stategraph"
+    }
+  ],
+  "note": "The Step 5 agent uses LangGraph for conditional orchestration and explicit Python safety rules. It does not call an external LLM and does not diagnose medical conditions.",
+  "event_agent_frameworks": [
+    "langgraph_stategraph"
+  ],
+  "source_timeline": "D:\\Sethmini\\Jobs\\Job Ass\\elderly-monitor\\results\\test_video\\timeline\\timeline.json",
+  "source_events": "D:\\Sethmini\\Jobs\\Job Ass\\elderly-monitor\\results\\test_video\\timeline\\bed_events.json"
+}

@@ -1,0 +1,42 @@
+{
+  "decision_version": "step6_contextual_alert_v1",
+  "decision_method": "deterministic_contextual_safety_rules",
+  "uses_external_llm_api": false,
+  "overall_decision": "MONITOR",
+  "decision_reason": "One or more contextual conditions require continued monitoring or review.",
+  "requires_human_review": false,
+  "thresholds": {
+    "sitting_on_bed_edge_monitor_sec": 120.0,
+    "prolonged_out_of_bed_monitor_sec": 300.0,
+    "prolonged_out_of_bed_alert_sec": 600.0,
+    "unknown_state_monitor_sec": 30.0
+  },
+  "summary": {
+    "bed_exit_count": 1,
+    "bed_return_count": 0,
+    "longest_continuous_out_of_bed_sec": 7.5,
+    "longest_continuous_unknown_sec": 1.5,
+    "longest_continuous_sitting_on_bed_sec": 11.0,
+    "timeline_final_state": "UNKNOWN"
+  },
+  "trigger_count": 1,
+  "triggers": [
+    {
+      "flag": "EVENT_DECISION",
+      "decision": "MONITOR",
+      "reason": "Step 5 classified this event as requiring monitoring or alert handling.",
+      "event_id": "bed_exit_001",
+      "event_type": "BED_EXIT",
+      "start_time_sec": 14.0,
+      "confirmed_time_sec": 15.5,
+      "context_support": "STRONG",
+      "confidence": 0.796,
+      "requires_human_review": false
+    }
+  ],
+  "upstream_step5_decision": "MONITOR",
+  "source_analysis_version": "step5_langgraph_agent_v2",
+  "note": "Step 6 is a transparent alert-policy layer. It does not diagnose a condition or prove a fall; uncertain evidence is surfaced for review.",
+  "source_timeline": "D:\\Sethmini\\Jobs\\Job Ass\\elderly-monitor\\results\\test_video\\timeline\\timeline.json",
+  "source_analysis": "D:\\Sethmini\\Jobs\\Job Ass\\elderly-monitor\\results\\test_video\\analysis\\agentic_analysis.json"
+}
