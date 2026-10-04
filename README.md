@@ -1,126 +1,110 @@
 # Elderly Monitor — Agentic AI + Vision Assignment
 
-A Python project scaffold for analyzing an indoor video, estimating an elderly person's activity over time, detecting bed exits/returns, calculating durations, and producing monitoring decisions.
+A Python CLI system for analyzing an indoor video of an elderly person, recognizing activity over time, detecting bed exits/returns, calculating activity durations, and producing NORMAL/MONITOR/ALERT decisions.
 
-> **Current stage: Step 2 (video frame sampling).** The CLI checks your environment, inspects video metadata, and samples still frames at a configurable rate. Person/activity recognition, bed-event logic, agent workflow, and evaluation will be implemented in later steps.
+## Current implementation
 
-## 1. Requirements
+The project currently contains the perception, temporal state tracking, bed-event detection, agentic contextual analysis, contextual alert rules, and evaluation framework required by the assignment.
 
+The main pipeline is:
+
+```text
+Video -> Frame Sampling -> YOLO Pose -> Pose Features
+      -> Activity Classification -> Temporal Smoothing
+      -> Bed Region / Occupancy -> Timeline
+      -> Bed Exit / Return Detection
+      -> LangGraph Agentic Context Analysis
+      -> NORMAL / MONITOR / ALERT
+```
+
+### Step 5: agentic analysis
+
+Step 5 uses a local **LangGraph `StateGraph`**. For a candidate bed event, the graph locates the event, inspects previous/following timeline context, conditionally expands the temporal window when evidence is ambiguous, checks spatial/movement evidence, and applies deterministic decision rules.
+
+The Step 5 agent currently uses **no external LLM or paid API**. LangGraph is used for orchestration; the actual safety decision remains explicit and deterministic.
+
+## Requirements
+
+- Python 3.11 recommended
 - Windows 10/11, macOS, or Linux
-- Python **3.11** recommended
-- Internet connection for installing Python packages and downloading pretrained model weights later
-- A short MP4 test video for the video-input check
-- No paid API key is required for this setup step
+- A test MP4 in `data/videos/`
+- Internet access only for installing dependencies and downloading the pretrained YOLO pose weights
+- No paid model/API key is required
 
-Ultralytics/PyTorch packages can take a while to install and require substantial disk space. CPU inference can be used for development; an NVIDIA GPU is optional.
-
-## 2. Open the project in Windows
-
-1. Download and extract the ZIP file.
-2. Open the extracted `elderly-monitor-starter` folder in VS Code.
-3. In VS Code, choose **Terminal → New Terminal**.
-4. Run the following commands in PowerShell from the project root.
+## Install
 
 ```powershell
-py -3.11 --version
-py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
+py -3.11 -m venv venv
+.\venv\Scripts\Activate.ps1
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-If PowerShell blocks activation, you can use this command for the current terminal session, then activate the environment again:
+If PowerShell blocks activation:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\.venv\Scripts\Activate.ps1
+.\venv\Scripts\Activate.ps1
 ```
 
-If `py -3.11` is not recognized, install Python 3.11 from <https://www.python.org/downloads/> and enable the Python launcher during installation.
+## Run the pipeline
 
-## 3. Select the VS Code interpreter
-
-Press `Ctrl+Shift+P` → search for **Python: Select Interpreter** → select the interpreter inside this project's `.venv` folder.
-
-## 4. Check the setup
-
-Run this from the project root while `.venv` is activated:
-
-```powershell
-python -m src.main --check-setup
-```
-
-The program should report the Python version, configuration status, expected folders, and installed dependencies. If some dependencies are missing, run:
-
-```powershell
-python -m pip install -r requirements.txt
-```
-
-## 5. Add a test video and check it
-
-Copy a short test video into `data/videos/`, for example:
-
-```text
-data/videos/test_video.mp4
-```
-
-Then run:
-
-```powershell
-python -m src.main --video data/videos/test_video.mp4
-```
-
-This command only checks that OpenCV can open the file and reports its resolution, source FPS, frame count, and approximate duration. It does not yet classify activities.
-
-## 6. Sample frames from the video (Step 2)
-
-Run this command from the project root:
-
-```powershell
-python -m src.main --sample-video data/videos/test_video.mp4
-```
-
-The default sampling rate comes from `video.sampling_fps` in `config.yaml` (initially one frame per second). To sample two frames per second, run:
+### Step 2 — sample frames
 
 ```powershell
 python -m src.main --sample-video data/videos/test_video.mp4 --sampling-fps 2
 ```
 
-For a quick test, save no more than 10 frames:
+### Step 3A — YOLO pose
 
 ```powershell
-python -m src.main --sample-video data/videos/test_video.mp4 --max-frames 10
+python -m src.main --pose-video data/videos/test_video.mp4
 ```
 
-The output will be saved under `results/test_video/` (using the input filename without its extension):
+### Step 3B — activity/state classification
 
-```text
-results/
-└── test_video/
-    ├── frame_manifest.json
-    └── frames/
-        ├── frame_000001_t00000.000s.jpg
-        ├── frame_000002_t00001.000s.jpg
-        └── ...
+```powershell
+python -m src.main --state-video data/videos/test_video.mp4
 ```
 
-Open the `frames` folder to visually inspect the sampled JPEG images. `frame_manifest.json` contains the source video metadata and each sampled frame's frame index and timestamp. No activity labels are predicted yet.
+### Step 4 — temporal timeline and bed events
 
-If a video is about 23 seconds long and sampling is set to 1 FPS, expect roughly 23 sampled frames. The exact count depends on the video's duration and frame timestamps.
+```powershell
+python -m src.main --events-video data/videos/test_video.mp4
+```
 
+### Step 5 — LangGraph agentic contextual analysis
 
-## 7. Configuration
+```powershell
+python -m src.agent.agentic_analysis --video data/videos/test_video.mp4
+```
 
-Edit `config.yaml` to adjust sampling FPS, model name, confidence thresholds, bed-event confirmation times, bed polygon, and example monitoring thresholds. The defaults are initial placeholders and must be tested against labelled videos.
-
-For a manually defined bed region, the polygon will use normalized `(x, y)` coordinates between `0.0` and `1.0`, relative to the image width and height. Leave `polygon: []` until the bed-region implementation is added.
-
-**Safety note:** The alert thresholds are engineering examples for this assignment, not clinically validated medical thresholds. Do not use this prototype as a real emergency or patient-monitoring system.
-
-## 8. Project structure
+Output:
 
 ```text
-elderly-monitor-starter/
+results/test_video/analysis/agentic_analysis.json
+```
+
+The report records the agent framework, temporal context inspected, spatial/movement checks, decision reasons, and whether human review is recommended.
+
+## Testing
+
+Run all tests:
+
+```powershell
+python -m unittest discover -s tests -p "test_*.py" -v
+```
+
+Run Step 5 tests only:
+
+```powershell
+python -m unittest tests.test_step5_agentic_analysis -v
+```
+
+## Project structure
+
+```text
+elderly-monitor/
 ├── README.md
 ├── requirements.txt
 ├── config.yaml
@@ -135,23 +119,16 @@ elderly-monitor-starter/
 │   ├── events/
 │   ├── agent/
 │   ├── alerts/
-│   ├── outputs/
-│   └── utils/
+│   └── evaluation/
 ├── evaluation/
 ├── results/
-├── docs/
-└── notebooks/
+└── docs/
 ```
 
-## 9. Next implementation steps
+## Important evaluation note
 
-1. Run person detection and pose estimation on the sampled frames.
-3. Define bed occupancy separately from activity state.
-4. Build temporal smoothing and state-transition logic.
-5. Detect bed exit/return events from sequences, not single frames.
-6. Add the agent to inspect earlier/later context for ambiguous observations.
-7. Generate summaries, timelines, alert decisions, and evaluation results.
+The evaluation framework expects **manually reviewed ground truth**. The template files are not evaluation results. Final submission metrics must be calculated from labelled videos, and at least three real failure cases should be documented.
 
-## 10. Privacy and data handling
+## Safety
 
-Use only videos you have permission to process. Prefer synthetic, public, or consented test data. Keep private videos and generated model weights out of source control; the provided `.gitignore` excludes them by default.
+This is an engineering assignment prototype. Alert thresholds are configurable examples and are not clinically validated medical thresholds. The system does not diagnose falls or medical emergencies.

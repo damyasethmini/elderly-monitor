@@ -1,6 +1,10 @@
 import unittest
 
-from src.agent.agentic_analysis import analyze_timeline_and_events
+from src.agent.agentic_analysis import (
+    LANGGRAPH_AVAILABLE,
+    _route_context,
+    analyze_timeline_and_events,
+)
 
 
 ALERTS = {
@@ -151,6 +155,25 @@ class Step5AgenticAnalysisTests(unittest.TestCase):
         report = analyze_timeline_and_events(tl, events, ALERTS, 0.15)
         self.assertEqual(report["event_analyses"][0]["decision"], "ALERT")
         self.assertEqual(report["overall_decision"], "ALERT")
+
+    def test_report_identifies_agent_framework_and_no_external_llm(self):
+        tl = timeline([
+            segment("LYING_IN_BED", 0, 5, True, True),
+            segment("SITTING_ON_BED", 5, 8, True, True),
+        ])
+        report = analyze_timeline_and_events(tl, {"events": [], "bed_summary": {}}, ALERTS)
+        self.assertEqual(report["uses_external_llm_api"], False)
+        self.assertIn("agent_framework", report)
+        self.assertIn("uses_langgraph", report)
+        self.assertEqual(report["uses_langgraph"], LANGGRAPH_AVAILABLE)
+
+    def test_ambiguous_context_routes_to_expansion(self):
+        state = {"context_is_ambiguous": True}
+        self.assertEqual(_route_context(state), "expand")
+
+    def test_clear_context_routes_directly_to_spatial_check(self):
+        state = {"context_is_ambiguous": False}
+        self.assertEqual(_route_context(state), "spatial")
 
 
 if __name__ == "__main__":
