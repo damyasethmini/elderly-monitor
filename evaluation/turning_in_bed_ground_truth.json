@@ -1,0 +1,15 @@
+{
+  "annotation_version": "step7_ground_truth_v2_reviewed",
+  "video": "turning_in_bed.mp4",
+  "observation_duration_sec": 13.18,
+  "states": [
+    {
+      "start_sec": 0.0,
+      "end_sec": 13.18,
+      "activity": "LYING_IN_BED",
+      "bed_occupancy": "IN_BED",
+      "note": "Manual review: person remains in bed for the full clip while turning/repositioning under the blanket."
+    }
+  ],
+  "bed_events": []
+}

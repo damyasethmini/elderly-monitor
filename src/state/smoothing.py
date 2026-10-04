@@ -346,47 +346,79 @@ def build_stable_segments(
     )
 
     # Merge isolated noise only if the same state occurs on both sides.
+    #
+    # Replace the three affected segments atomically, then restart the scan.
+    # The older in-place/index-skipping implementation could accidentally
+    # discard an adjacent short segment when several short states alternated,
+    # which created gaps in the final timeline.
     changed = True
 
     while changed and len(segments) >= 3:
         changed = False
-        merged: list[dict[str, Any]] = []
-        index = 0
 
-        while index < len(segments):
-            if (
-                0 < index < len(segments) - 1
-                and segments[index]["duration_sec"] < min_state_duration_sec
-                and segments[index - 1]["activity"]
-                == segments[index + 1]["activity"]
-                and segments[index - 1]["bed_occupancy"]
-                == segments[index + 1]["bed_occupancy"]
+        for index in range(1, len(segments) - 1):
+            current = segments[index]
+            previous = segments[index - 1]
+            following = segments[index + 1]
+
+            if not (
+                current["duration_sec"] < min_state_duration_sec
+                and previous["activity"] == following["activity"]
+                and previous["bed_occupancy"] == following["bed_occupancy"]
             ):
-                previous = dict(segments[index - 1])
-                following = segments[index + 1]
-
-                previous["end_sec"] = following["end_sec"]
-                previous["duration_sec"] = round(
-                    previous["end_sec"] - previous["start_sec"],
-                    3,
-                )
-                previous["frame_count"] += (
-                    segments[index]["frame_count"]
-                    + following["frame_count"]
-                )
-
-                if merged:
-                    merged[-1] = previous
-                else:
-                    merged.append(previous)
-
-                index += 2
-                changed = True
                 continue
 
-            merged.append(segments[index])
-            index += 1
+            combined = dict(previous)
+            combined["end_sec"] = following["end_sec"]
+            combined["duration_sec"] = round(
+                combined["end_sec"] - combined["start_sec"],
+                3,
+            )
 
-        segments = merged
+            previous_frames = int(previous.get("frame_count", 0))
+            current_frames = int(current.get("frame_count", 0))
+            following_frames = int(following.get("frame_count", 0))
+            total_frames = previous_frames + current_frames + following_frames
+            combined["frame_count"] = total_frames
+
+            if total_frames > 0:
+                combined["mean_confidence"] = round(
+                    (
+                        float(previous.get("mean_confidence", 0.0))
+                        * previous_frames
+                        + float(current.get("mean_confidence", 0.0))
+                        * current_frames
+                        + float(following.get("mean_confidence", 0.0))
+                        * following_frames
+                    )
+                    / total_frames,
+                    4,
+                )
+
+            combined["bed_region_inside_at_end"] = following.get(
+                "bed_region_inside_at_end"
+            )
+
+            outside_values = [
+                previous.get("bed_region_contains_outside_point"),
+                current.get("bed_region_contains_outside_point"),
+                following.get("bed_region_contains_outside_point"),
+            ]
+            known_outside_values = [
+                value for value in outside_values if value is not None
+            ]
+            combined["bed_region_contains_outside_point"] = (
+                any(value is True for value in known_outside_values)
+                if known_outside_values
+                else None
+            )
+
+            segments = (
+                segments[: index - 1]
+                + [combined]
+                + segments[index + 2 :]
+            )
+            changed = True
+            break
 
     return segments
