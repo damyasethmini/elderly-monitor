@@ -1,62 +1,50 @@
 {
-  "annotation_version": "step7_ground_truth_v1",
-  "video": "timeline",
+  "annotation_version": "step7_ground_truth_v2_reviewed",
+  "video": "test_video.mp4",
   "observation_duration_sec": 23.0,
   "states": [
     {
       "start_sec": 0.0,
-      "end_sec": 0.5,
-      "activity": "UNKNOWN",
-      "bed_occupancy": "UNKNOWN",
-      "note": "Replace UNKNOWN values with manually reviewed ground truth."
+      "end_sec": 13.5,
+      "activity": "SITTING_ON_BED",
+      "bed_occupancy": "IN_BED",
+      "note": "Manual review: person remains seated on the bed."
     },
     {
-      "start_sec": 0.5,
-      "end_sec": 1.5,
-      "activity": "UNKNOWN",
-      "bed_occupancy": "UNKNOWN",
-      "note": "Replace UNKNOWN values with manually reviewed ground truth."
-    },
-    {
-      "start_sec": 1.5,
-      "end_sec": 3.0,
-      "activity": "UNKNOWN",
-      "bed_occupancy": "UNKNOWN",
-      "note": "Replace UNKNOWN values with manually reviewed ground truth."
-    },
-    {
-      "start_sec": 3.0,
+      "start_sec": 13.5,
       "end_sec": 14.0,
       "activity": "UNKNOWN",
       "bed_occupancy": "UNKNOWN",
-      "note": "Replace UNKNOWN values with manually reviewed ground truth."
+      "note": "Sit-to-stand transition; ambiguous short transition interval."
     },
     {
       "start_sec": 14.0,
-      "end_sec": 14.5,
-      "activity": "UNKNOWN",
-      "bed_occupancy": "UNKNOWN",
-      "note": "Replace UNKNOWN values with manually reviewed ground truth."
+      "end_sec": 19.75,
+      "activity": "STANDING",
+      "bed_occupancy": "OUT_OF_BED",
+      "note": "Person is standing beside/outside the bed."
     },
     {
-      "start_sec": 14.5,
-      "end_sec": 21.5,
-      "activity": "UNKNOWN",
-      "bed_occupancy": "UNKNOWN",
-      "note": "Replace UNKNOWN values with manually reviewed ground truth."
+      "start_sec": 19.75,
+      "end_sec": 22.0,
+      "activity": "WALKING",
+      "bed_occupancy": "OUT_OF_BED",
+      "note": "Person walks away from the bed."
     },
     {
-      "start_sec": 21.5,
+      "start_sec": 22.0,
       "end_sec": 23.0,
       "activity": "UNKNOWN",
-      "bed_occupancy": "UNKNOWN",
-      "note": "Replace UNKNOWN values with manually reviewed ground truth."
+      "bed_occupancy": "OUT_OF_BED",
+      "note": "Person leaves/mostly leaves the camera view; activity is not confidently visible."
     }
   ],
-  "bed_events": [],
-  "notes": [
-    "Ground truth should be manually annotated from the source video, not copied from the prediction.",
-    "Use UNKNOWN when the video does not provide enough evidence.",
-    "OUT_OF_BED is represented through bed_occupancy so primary activity durations remain mutually exclusive."
+  "bed_events": [
+    {
+      "event_type": "BED_EXIT",
+      "start_time_sec": 14.0,
+      "confirmed_time_sec": 20.0,
+      "note": "Manual review: exit starts around standing transition; movement away becomes clearly confirmed around 20s."
+    }
   ]
 }
