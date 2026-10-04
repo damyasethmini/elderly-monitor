@@ -191,47 +191,106 @@ def _events_from_input(data: dict[str, Any]) -> list[dict[str, Any]]:
     raw = data.get("bed_events", data.get("events", []))
     if not isinstance(raw, list):
         raise ValueError("Ground truth JSON must contain a 'bed_events' list.")
-    events = []
+
+    events: list[dict[str, Any]] = []
     for index, item in enumerate(raw):
         if not isinstance(item, dict):
             raise ValueError(f"Invalid bed event at index {index}: {item}")
+
         event_type = str(item.get("event_type", item.get("event", ""))).upper()
         if event_type not in EVENT_TYPES:
             continue
-        timestamp = item.get("timestamp_sec", item.get("confirmed_time_sec", item.get("time_sec")))
-        if timestamp is None:
-            raise ValueError(f"Missing timestamp for ground truth event at index {index}.")
-        events.append({"event_type": event_type, "timestamp_sec": float(timestamp)})
-    return sorted(events, key=lambda item: item["timestamp_sec"])
+
+        # Event identity is based on when the event starts. This is kept
+        # separate from when enough evidence accumulated to confirm it.
+        start_value = item.get("start_time_sec", item.get("timestamp_sec", item.get("time_sec")))
+        confirmed_value = item.get("confirmed_time_sec")
+
+        # Backward compatibility for older annotations that only stored one
+        # event timestamp. In that case the same timestamp is used as start.
+        if start_value is None and confirmed_value is not None:
+            start_value = confirmed_value
+
+        if start_value is None:
+            raise ValueError(f"Missing event start timestamp at index {index}.")
+
+        event = {
+            "event_type": event_type,
+            "start_time_sec": float(start_value),
+        }
+        if confirmed_value is not None:
+            event["confirmed_time_sec"] = float(confirmed_value)
+        events.append(event)
+
+    return sorted(events, key=lambda item: item["start_time_sec"])
 
 
 def event_metrics(gt_events: list[dict[str, Any]], pred_events: list[dict[str, Any]], tolerance_sec: float) -> dict[str, Any]:
     results: dict[str, Any] = {}
+
     for event_type in EVENT_TYPES:
         gt = [event for event in gt_events if event["event_type"] == event_type]
         pred = [event for event in pred_events if event["event_type"] == event_type]
         used_gt: set[int] = set()
-        matched = []
-        false_positive = []
+        matched: list[dict[str, Any]] = []
+        false_positive: list[float] = []
+
         for p in pred:
+            p_start = float(p["start_time_sec"])
             candidates = [
-                (idx, abs(p["timestamp_sec"] - g["timestamp_sec"]))
+                (idx, abs(p_start - float(g["start_time_sec"])))
                 for idx, g in enumerate(gt)
-                if idx not in used_gt and abs(p["timestamp_sec"] - g["timestamp_sec"]) <= tolerance_sec
+                if idx not in used_gt
+                and abs(p_start - float(g["start_time_sec"])) <= tolerance_sec
             ]
-            if candidates:
-                gt_index, delta = min(candidates, key=lambda item: item[1])
-                used_gt.add(gt_index)
-                matched.append({"predicted_sec": p["timestamp_sec"], "ground_truth_sec": gt[gt_index]["timestamp_sec"], "absolute_error_sec": round(delta, 3)})
-            else:
-                false_positive.append(p["timestamp_sec"])
-        false_negative = [g["timestamp_sec"] for idx, g in enumerate(gt) if idx not in used_gt]
+
+            if not candidates:
+                false_positive.append(p_start)
+                continue
+
+            gt_index, start_delta = min(candidates, key=lambda item: item[1])
+            used_gt.add(gt_index)
+            g = gt[gt_index]
+
+            match = {
+                "predicted_start_sec": p_start,
+                "ground_truth_start_sec": float(g["start_time_sec"]),
+                "start_time_absolute_error_sec": round(start_delta, 3),
+            }
+
+            # Confirmation timing is a quality/latency measurement, not the
+            # criterion used to decide whether the event itself was detected.
+            if "confirmed_time_sec" in p and "confirmed_time_sec" in g:
+                p_confirm = float(p["confirmed_time_sec"])
+                g_confirm = float(g["confirmed_time_sec"])
+                match.update({
+                    "predicted_confirmed_sec": p_confirm,
+                    "ground_truth_confirmed_sec": g_confirm,
+                    "confirmation_time_error_sec": round(p_confirm - g_confirm, 3),
+                    "confirmation_time_absolute_error_sec": round(abs(p_confirm - g_confirm), 3),
+                })
+
+            matched.append(match)
+
+        false_negative = [
+            float(g["start_time_sec"])
+            for idx, g in enumerate(gt)
+            if idx not in used_gt
+        ]
+
         tp = len(matched)
         fp = len(false_positive)
         fn = len(false_negative)
         precision = tp / (tp + fp) if tp + fp else 0.0
         recall = tp / (tp + fn) if tp + fn else 0.0
         f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
+
+        confirmation_errors = [
+            item["confirmation_time_absolute_error_sec"]
+            for item in matched
+            if "confirmation_time_absolute_error_sec" in item
+        ]
+
         results[event_type] = {
             "ground_truth_count": len(gt),
             "predicted_count": len(pred),
@@ -242,9 +301,15 @@ def event_metrics(gt_events: list[dict[str, Any]], pred_events: list[dict[str, A
             "recall": round(recall, 4),
             "f1": round(f1, 4),
             "matches": matched,
-            "false_positive_times_sec": false_positive,
-            "missed_ground_truth_times_sec": false_negative,
+            "false_positive_start_times_sec": false_positive,
+            "missed_ground_truth_start_times_sec": false_negative,
+            "confirmation_time_mae_sec": (
+                round(sum(confirmation_errors) / len(confirmation_errors), 3)
+                if confirmation_errors
+                else None
+            ),
         }
+
     return results
 
 
@@ -317,7 +382,7 @@ def evaluate(timeline_path: Path, events_path: Path, ground_truth_path: Path, ev
         "ground_truth": str(ground_truth_path.resolve()),
         "notes": [
             "Activity accuracy is duration-weighted over the annotated observation window.",
-            "Bed-event matching uses nearest unmatched event within the configured timestamp tolerance.",
+            "Bed-event precision/recall matches events by start time within the configured tolerance; confirmation timing error is reported separately.",
             "Duration error is predicted minus ground-truth seconds; absolute_error_sec is its magnitude.",
             "Metrics are only as valid as the manually labelled ground truth and the evaluated video set.",
         ],
