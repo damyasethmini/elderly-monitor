@@ -66,8 +66,7 @@ elderly-monitor/
 ├── README.md
 ├── RUN_ALL.ps1
 ├── data/
-│   ├── videos/
-│   │   └── test_video.mp4
+│   ├── videos/                 # downloaded locally; raw videos are ignored by Git
 │   ├── bed_regions/
 │   └── ground_truth/
 ├── src/
@@ -90,12 +89,19 @@ elderly-monitor/
 │       └── evaluate.py
 ├── tests/
 │   ├── test_step4_bed_events.py
+│   ├── test_step4_timeline_continuity.py
 │   ├── test_step5_agentic_analysis.py
 │   ├── test_step6_contextual_alert.py
 │   └── test_step7_evaluation.py
 ├── evaluation/
 │   ├── test_video_ground_truth.json
 │   ├── test_video_evaluation_report.json
+│   ├── return_to_bed_ground_truth.json
+│   ├── return_to_bed_evaluation_report.json
+│   ├── ambiguous_sitting_ground_truth.json
+│   ├── ambiguous_sitting_evaluation_report.json
+│   ├── turning_in_bed_ground_truth.json
+│   ├── turning_in_bed_evaluation_report.json
 │   └── failure_cases.md
 ├── docs/
 │   └── architecture.md
@@ -115,6 +121,23 @@ python -m pip install -r requirements.txt
 ```
 
 The pretrained YOLO weights are downloaded automatically by Ultralytics on first use if they are not already present locally.
+
+## Evaluation videos
+
+The raw video files are intentionally **not committed to Git** because they are large input assets. Download the public clips below and place them in:
+
+```text
+data/videos/
+```
+
+| Local filename | Scenario | Public source |
+| --- | --- | --- |
+| `test_video.mp4` | Bed exit / walking away | [Pexels — Person Getting Out of Bed](https://www.pexels.com/video/person-getting-out-of-bed-6918469/) 
+| `return_to_bed.mp4` | Returning to bed | [Pexels — Woman Settling to Sleep in a Cozy Bedroom](https://www.pexels.com/video/woman-settling-to-sleep-in-a-cozy-bedroom-36604163/) |
+| `ambiguous_sitting.mp4` | Sitting/stretching on the bed without leaving | [Pexels — Person Sitting on His Bed While Stretching His Arms](https://www.pexels.com/video/person-sitting-on-his-bed-while-stretching-his-arms-5983676/) |
+| `turning_in_bed.mp4` | Turning/repositioning while lying in bed | [Mixkit — Man Lying Down Moving a Lot Because of Not Being Able to Sleep](https://mixkit.co/free-stock-video/man-lying-down-moving-a-lot-because-of-not-being-31414/) |
+
+After downloading, rename the files to the filenames shown above.
 
 ## Run from Step 1
 
@@ -157,6 +180,7 @@ Important Step 4 safeguards include:
 - spatial outside-bed evidence for exit confirmation
 - return-to-bed confirmation using segment start/end bed-region evidence
 - `UNKNOWN` breaking confirmed continuous episodes
+- timeline-continuity protection so short-segment merging does not create gaps
 
 ### Step 5 — LangGraph agentic analysis
 
@@ -189,7 +213,7 @@ python -m src.evaluation.evaluate --video data/videos/test_video.mp4 --ground-tr
 python -m unittest discover -s tests -v
 ```
 
-The current suite contains **31 tests** across Steps 4–7.
+The current suite contains **32 tests** across Steps 4–7.
 
 You can also run the full sequence using:
 
@@ -197,36 +221,83 @@ You can also run the full sequence using:
 .\RUN_ALL.ps1
 ```
 
-## Current evaluated example
+## Evaluation summary
 
-For the included `test_video.mp4` and manually reviewed ground truth:
+The final evaluation uses multiple scenarios rather than only one clip.
 
-| Metric | Result |
-| --- | ---: |
-| Activity accuracy | 72.83% |
-| Bed occupancy accuracy | 84.78% |
-| BED_EXIT precision | 100% |
-| BED_EXIT recall | 100% |
-| Duration MAE | 1.42 s |
-| BED_EXIT start-time error | 0.0 s |
-| BED_EXIT confirmation-time absolute error | 4.5 s |
+| Video | Main scenario | Activity accuracy | Bed occupancy accuracy | Duration MAE |
+| --- | --- | ---: | ---: | ---: |
+| `test_video.mp4` | Bed exit / walking away | 72.83% | 84.78% | 1.42 s |
+| `return_to_bed.mp4` | Return to bed / blanket occlusion | 40.95% | 8.19% | 2.29 s |
+| `ambiguous_sitting.mp4` | Sitting/stretching without leaving | 46.50% | 46.50% | 3.30 s |
+| `turning_in_bed.mp4` | Turning under blanket / low pose visibility | 26.58% | 26.58% | 3.28 s |
 
-`RETURN_TO_BED` is **N/A for this clip** because neither the ground truth nor the prediction contains a return event.
+### Bed-event results
 
-The example demonstrates a working end-to-end pipeline, but the assignment should be evaluated on additional scenarios before final submission. In particular, add videos containing return-to-bed behavior and difficult cases such as occlusion, sitting on a chair, blankets, poor lighting, and temporary camera-view loss.
+For `test_video.mp4`:
+
+- `BED_EXIT` precision: **100%**
+- `BED_EXIT` recall: **100%**
+- BED_EXIT start-time error: **0.0 s**
+- BED_EXIT confirmation-time absolute error: **4.5 s**
+- `RETURN_TO_BED`: **N/A** because the clip contains no return event
+
+For `return_to_bed.mp4`:
+
+- ground truth contains one `RETURN_TO_BED`
+- the system predicted no return event
+- `RETURN_TO_BED` recall: **0%**
+- the main failure is loss of reliable pose evidence when the person becomes partially occluded by the bed/blanket
+
+For `ambiguous_sitting.mp4`:
+
+- no bed exit is present in ground truth
+- the system correctly produced **no false `BED_EXIT`**
+- `SITTING_ON_BED` precision: **100%**
+- `SITTING_ON_BED` recall: **46.5%**
+
+For `turning_in_bed.mp4`:
+
+- no bed exit is present in ground truth
+- the system correctly produced **no false `BED_EXIT`**
+- `LYING_IN_BED` precision: **100%**
+- `LYING_IN_BED` recall: **26.58%**
+
+For videos where neither ground truth nor prediction contains a given event, event precision/recall should be interpreted as **N/A**, even if the raw evaluation JSON stores `0.0`.
+
+## Difficult cases and failure analysis
+
+### 1. Return-to-bed under blanket/bed occlusion
+
+In `return_to_bed.mp4`, the person approaches and gets back into bed, but YOLO Pose loses reliable body keypoints once the person becomes partially hidden by the bed/blanket. Much of the sequence becomes `UNKNOWN`, and the `RETURN_TO_BED` event is missed.
+
+### 2. Stretching while seated on the bed
+
+In `ambiguous_sitting.mp4`, the person remains seated on the bed while stretching. The event layer correctly avoids a false bed exit, but unusual torso/arm geometry causes many frames to become `UNKNOWN`, reducing `SITTING_ON_BED` recall.
+
+### 3. Turning under blankets / low pose visibility
+
+In `turning_in_bed.mp4`, the person remains lying in bed while repeatedly changing position. No false bed exit is generated, but pose detection is unreliable for much of the clip. A timeline-continuity regression found during this test was fixed, and a dedicated regression test was added.
+
+Additional failure details are documented in `evaluation/failure_cases.md`.
 
 ## Important outputs
 
+Typical compact outputs committed to the repository include:
+
 ```text
-results/test_video/frame_manifest.json
-results/test_video/pose/pose_manifest.json
-results/test_video/state/state_manifest.json
-results/test_video/timeline/timeline.json
-results/test_video/timeline/bed_events.json
-results/test_video/analysis/agentic_analysis.json
-results/test_video/alerts/contextual_alert.json
-evaluation/test_video_evaluation_report.json
+results/<video_name>/state/state_manifest.json
+results/<video_name>/timeline/timeline.json
+results/<video_name>/timeline/bed_events.json
+results/<video_name>/analysis/agentic_analysis.json
+results/<video_name>/alerts/contextual_alert.json
+
+evaluation/<video_name>_ground_truth.json
+evaluation/<video_name>_evaluation_report.json
+evaluation/failure_cases.md
 ```
+
+Large generated frame folders, annotated pose images, per-frame pose observations, model weights, and raw videos are excluded through `.gitignore`.
 
 ## Alert interpretation
 
@@ -242,15 +313,28 @@ The thresholds are assignment/prototype rules, not clinically validated medical 
 - Activity accuracy is duration-weighted.
 - Bed events are matched using event **start time** within the configured tolerance.
 - Confirmation-time error is reported separately so a correctly detected event is not incorrectly counted as both a false positive and false negative merely because confirmation timing differs.
+- Activity-duration error is reported as predicted duration minus ground-truth duration.
 - At least three real failure cases are documented in `evaluation/failure_cases.md`.
+- `UNKNOWN` is deliberately used when the vision evidence is insufficient rather than forcing an unreliable state.
 
 ## Known limitations
 
-- Activity recognition is a rule-based pose baseline and still confuses similar postures.
+- Activity recognition is a rule-based pose baseline and can confuse similar postures.
 - Walking can be confused with standing when motion evidence is weak.
-- Bed-region estimation is heuristic and can be improved with a manually labelled region or object detector.
-- The current included video does not contain a return-to-bed example.
-- The current agent is LangGraph-orchestrated but does not use an LLM/VLM. A local VLM could later be used only for ambiguous observations if desired.
+- Pose estimation can fail when the person is hidden by blankets, bedding, or poor visibility.
+- Bed-region estimation is heuristic and could be improved with a manually labelled region or a dedicated bed/object detector.
+- The current pipeline primarily follows one main person and is not designed for robust caregiver/multi-person identity tracking.
+- The current agent is LangGraph-orchestrated but does not use an external LLM/VLM.
+- A future local VLM fallback could be used only for ambiguous observations such as heavy occlusion or determining whether a horizontal person is on the bed or elsewhere.
+
+## What I would improve with more time
+
+- combine pose features with a dedicated bed/person detector
+- use stronger temporal motion features for `WALKING` versus `STANDING`
+- add more return-to-bed and multi-person/caregiver evaluation clips
+- add manually defined bed regions for more reliable spatial evaluation
+- optionally use a local VLM only for ambiguous/occluded observations
+- aggregate metrics across a larger labelled test set
 
 ## Safety disclaimer
 
