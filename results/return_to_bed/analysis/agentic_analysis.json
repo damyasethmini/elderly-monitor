@@ -1,0 +1,31 @@
+{
+  "analysis_version": "step5_langgraph_agent_v2",
+  "analysis_method": "langgraph_stategraph_deterministic_context_checks",
+  "agent_framework": "LangGraph StateGraph",
+  "uses_langgraph": true,
+  "uses_external_llm_api": false,
+  "observation_duration_sec": 12.5,
+  "overall_decision": "NORMAL",
+  "decision_reasons": [
+    "No configured monitoring or alert condition was triggered by the available evidence."
+  ],
+  "thresholds": {
+    "sitting_on_bed_edge_monitor_sec": 120.0,
+    "prolonged_out_of_bed_monitor_sec": 300.0,
+    "prolonged_out_of_bed_alert_sec": 600.0,
+    "unknown_state_monitor_sec": 30.0
+  },
+  "summary": {
+    "bed_exit_count": 0,
+    "bed_return_count": 0,
+    "longest_continuous_out_of_bed_sec": 2.0,
+    "longest_continuous_unknown_sec": 6.0,
+    "longest_continuous_sitting_on_bed_sec": 0.0,
+    "timeline_final_state": "UNKNOWN"
+  },
+  "observation_flags": [],
+  "event_analyses": [],
+  "note": "The Step 5 agent uses LangGraph for conditional orchestration and explicit Python safety rules. It does not call an external LLM and does not diagnose medical conditions.",
+  "source_timeline": "D:\\Sethmini\\Jobs\\Job Ass\\elderly-monitor\\results\\return_to_bed\\timeline\\timeline.json",
+  "source_events": "D:\\Sethmini\\Jobs\\Job Ass\\elderly-monitor\\results\\return_to_bed\\timeline\\bed_events.json"
+}
