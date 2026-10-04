@@ -1,0 +1,214 @@
+{
+  "evaluation_version": "step7_evaluation_v1",
+  "observation_duration_sec": 23.0,
+  "activity_recognition": {
+    "accuracy": 0.7283,
+    "evaluated_duration_sec": 23.0,
+    "per_state": {
+      "LYING_IN_BED": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "ground_truth_sec": 0,
+        "predicted_sec": 1.5
+      },
+      "SITTING_ON_BED": {
+        "precision": 0.9545,
+        "recall": 0.7778,
+        "f1": 0.8571,
+        "ground_truth_sec": 13.5,
+        "predicted_sec": 11.0
+      },
+      "SITTING_OUTSIDE_BED": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "ground_truth_sec": 0,
+        "predicted_sec": 0
+      },
+      "STANDING": {
+        "precision": 0.6562,
+        "recall": 0.913,
+        "f1": 0.7636,
+        "ground_truth_sec": 5.75,
+        "predicted_sec": 8.0
+      },
+      "WALKING": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0,
+        "ground_truth_sec": 2.25,
+        "predicted_sec": 0.5
+      },
+      "UNKNOWN": {
+        "precision": 0.5,
+        "recall": 0.6667,
+        "f1": 0.5714,
+        "ground_truth_sec": 1.5,
+        "predicted_sec": 2.0
+      }
+    },
+    "confusion_matrix_sec": {
+      "LYING_IN_BED": {
+        "LYING_IN_BED": 0,
+        "SITTING_ON_BED": 0,
+        "SITTING_OUTSIDE_BED": 0,
+        "STANDING": 0,
+        "WALKING": 0,
+        "UNKNOWN": 0
+      },
+      "SITTING_ON_BED": {
+        "LYING_IN_BED": 1.5,
+        "SITTING_ON_BED": 10.5,
+        "SITTING_OUTSIDE_BED": 0,
+        "STANDING": 1.0,
+        "WALKING": 0,
+        "UNKNOWN": 0.5
+      },
+      "SITTING_OUTSIDE_BED": {
+        "LYING_IN_BED": 0,
+        "SITTING_ON_BED": 0,
+        "SITTING_OUTSIDE_BED": 0,
+        "STANDING": 0,
+        "WALKING": 0,
+        "UNKNOWN": 0
+      },
+      "STANDING": {
+        "LYING_IN_BED": 0,
+        "SITTING_ON_BED": 0,
+        "SITTING_OUTSIDE_BED": 0,
+        "STANDING": 5.25,
+        "WALKING": 0.5,
+        "UNKNOWN": 0
+      },
+      "WALKING": {
+        "LYING_IN_BED": 0,
+        "SITTING_ON_BED": 0,
+        "SITTING_OUTSIDE_BED": 0,
+        "STANDING": 1.75,
+        "WALKING": 0,
+        "UNKNOWN": 0.5
+      },
+      "UNKNOWN": {
+        "LYING_IN_BED": 0,
+        "SITTING_ON_BED": 0.5,
+        "SITTING_OUTSIDE_BED": 0,
+        "STANDING": 0,
+        "WALKING": 0,
+        "UNKNOWN": 1.0
+      }
+    }
+  },
+  "bed_occupancy_recognition": {
+    "accuracy": 0.8478,
+    "evaluated_duration_sec": 23.0,
+    "confusion_matrix_sec": {
+      "IN_BED": {
+        "IN_BED": 12.0,
+        "OUT_OF_BED": 1.0,
+        "UNKNOWN": 0.5
+      },
+      "OUT_OF_BED": {
+        "IN_BED": 0,
+        "OUT_OF_BED": 7.5,
+        "UNKNOWN": 1.5
+      },
+      "UNKNOWN": {
+        "IN_BED": 0.5,
+        "OUT_OF_BED": 0,
+        "UNKNOWN": 0
+      }
+    }
+  },
+  "duration_estimation": {
+    "by_state": {
+      "LYING_IN_BED": {
+        "ground_truth_sec": 0.0,
+        "predicted_sec": 1.5,
+        "error_sec": 1.5,
+        "absolute_error_sec": 1.5
+      },
+      "SITTING_ON_BED": {
+        "ground_truth_sec": 13.5,
+        "predicted_sec": 11.0,
+        "error_sec": -2.5,
+        "absolute_error_sec": 2.5
+      },
+      "SITTING_OUTSIDE_BED": {
+        "ground_truth_sec": 0.0,
+        "predicted_sec": 0.0,
+        "error_sec": 0.0,
+        "absolute_error_sec": 0.0
+      },
+      "STANDING": {
+        "ground_truth_sec": 5.75,
+        "predicted_sec": 8.0,
+        "error_sec": 2.25,
+        "absolute_error_sec": 2.25
+      },
+      "WALKING": {
+        "ground_truth_sec": 2.25,
+        "predicted_sec": 0.5,
+        "error_sec": -1.75,
+        "absolute_error_sec": 1.75
+      },
+      "UNKNOWN": {
+        "ground_truth_sec": 1.5,
+        "predicted_sec": 2.0,
+        "error_sec": 0.5,
+        "absolute_error_sec": 0.5
+      }
+    },
+    "mae_sec": 1.417
+  },
+  "bed_events": {
+    "BED_EXIT": {
+      "ground_truth_count": 1,
+      "predicted_count": 1,
+      "true_positive": 1,
+      "false_positive": 0,
+      "false_negative": 0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "matches": [
+        {
+          "predicted_start_sec": 14.0,
+          "ground_truth_start_sec": 14.0,
+          "start_time_absolute_error_sec": 0.0,
+          "predicted_confirmed_sec": 15.5,
+          "ground_truth_confirmed_sec": 20.0,
+          "confirmation_time_error_sec": -4.5,
+          "confirmation_time_absolute_error_sec": 4.5
+        }
+      ],
+      "false_positive_start_times_sec": [],
+      "missed_ground_truth_start_times_sec": [],
+      "confirmation_time_mae_sec": 4.5
+    },
+    "RETURN_TO_BED": {
+      "ground_truth_count": 0,
+      "predicted_count": 0,
+      "true_positive": 0,
+      "false_positive": 0,
+      "false_negative": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "matches": [],
+      "false_positive_start_times_sec": [],
+      "missed_ground_truth_start_times_sec": [],
+      "confirmation_time_mae_sec": null
+    }
+  },
+  "event_match_tolerance_sec": 2.0,
+  "predicted_timeline": "D:\\Sethmini\\Jobs\\Job Ass\\elderly-monitor\\results\\test_video\\timeline\\timeline.json",
+  "predicted_events": "D:\\Sethmini\\Jobs\\Job Ass\\elderly-monitor\\results\\test_video\\timeline\\bed_events.json",
+  "ground_truth": "D:\\Sethmini\\Jobs\\Job Ass\\elderly-monitor\\evaluation\\test_video_ground_truth.json",
+  "notes": [
+    "Activity accuracy is duration-weighted over the annotated observation window.",
+    "Bed-event precision/recall matches events by start time within the configured tolerance; confirmation timing error is reported separately.",
+    "Duration error is predicted minus ground-truth seconds; absolute_error_sec is its magnitude.",
+    "Metrics are only as valid as the manually labelled ground truth and the evaluated video set."
+  ]
+}
