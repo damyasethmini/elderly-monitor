@@ -1,0 +1,15 @@
+{
+  "annotation_version": "step7_ground_truth_v2_reviewed",
+  "video": "ambiguous_sitting.mp4",
+  "observation_duration_sec": 18.28,
+  "states": [
+    {
+      "start_sec": 0.0,
+      "end_sec": 18.28,
+      "activity": "SITTING_ON_BED",
+      "bed_occupancy": "IN_BED",
+      "note": "Manual review: person remains seated on the bed for the full clip while stretching/moving the arms; no bed exit occurs."
+    }
+  ],
+  "bed_events": []
+}

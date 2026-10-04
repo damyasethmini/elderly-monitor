@@ -1,0 +1,43 @@
+{
+  "annotation_version": "step7_ground_truth_v2_reviewed",
+  "video": "return_to_bed.mp4",
+  "observation_duration_sec": 12.21,
+  "states": [
+    {
+      "start_sec": 0.0,
+      "end_sec": 4.0,
+      "activity": "UNKNOWN",
+      "bed_occupancy": "OUT_OF_BED",
+      "note": "Bed is empty and the monitored person is not yet visible."
+    },
+    {
+      "start_sec": 4.0,
+      "end_sec": 5.5,
+      "activity": "WALKING",
+      "bed_occupancy": "OUT_OF_BED",
+      "note": "Person enters the scene and approaches the bed."
+    },
+    {
+      "start_sec": 5.5,
+      "end_sec": 7.5,
+      "activity": "SITTING_ON_BED",
+      "bed_occupancy": "IN_BED",
+      "note": "Person gets onto the bed and settles under the blanket."
+    },
+    {
+      "start_sec": 7.5,
+      "end_sec": 12.21,
+      "activity": "LYING_IN_BED",
+      "bed_occupancy": "IN_BED",
+      "note": "Person is visibly lying in bed."
+    }
+  ],
+  "bed_events": [
+    {
+      "event_type": "RETURN_TO_BED",
+      "start_time_sec": 5.5,
+      "confirmed_time_sec": 7.5,
+      "note": "Return starts when the person gets onto/sits on the bed and is confirmed once lying in bed."
+    }
+  ]
+}
