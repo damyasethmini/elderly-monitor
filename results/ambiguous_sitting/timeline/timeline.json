@@ -1352,7 +1352,7 @@
       "end_sec": 18.5,
       "duration_sec": 3.5,
       "frame_count": 7,
-      "mean_confidence": 0.0,
+      "mean_confidence": 0.12,
       "bed_region_inside_at_start": true,
       "bed_region_inside_at_end": true,
       "bed_region_contains_outside_point": false,

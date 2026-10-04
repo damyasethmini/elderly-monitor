@@ -140,7 +140,7 @@
           "start_sec": 14.5,
           "end_sec": 21.5,
           "duration_sec": 7.0,
-          "mean_confidence": 0.56,
+          "mean_confidence": 0.5629,
           "bed_region_inside_at_start": false,
           "bed_region_inside_at_end": false,
           "bed_region_contains_outside_point": true,

@@ -64,7 +64,6 @@ elderly-monitor/
 ├── config.yaml
 ├── requirements.txt
 ├── README.md
-├── RUN_ALL.ps1
 ├── data/
 │   ├── videos/                 # downloaded locally; raw videos are ignored by Git
 │   ├── bed_regions/
@@ -132,7 +131,7 @@ data/videos/
 
 | Local filename | Scenario | Public source |
 | --- | --- | --- |
-| `test_video.mp4` | Bed exit / walking away | [Pexels — Person Getting Out of Bed](https://www.pexels.com/video/person-getting-out-of-bed-6918469/) 
+| `test_video.mp4` | Bed exit / walking away | [Pexels — Person Getting Out of Bed](https://www.pexels.com/video/person-getting-out-of-bed-6918469/) |
 | `return_to_bed.mp4` | Returning to bed | [Pexels — Woman Settling to Sleep in a Cozy Bedroom](https://www.pexels.com/video/woman-settling-to-sleep-in-a-cozy-bedroom-36604163/) |
 | `ambiguous_sitting.mp4` | Sitting/stretching on the bed without leaving | [Pexels — Person Sitting on His Bed While Stretching His Arms](https://www.pexels.com/video/person-sitting-on-his-bed-while-stretching-his-arms-5983676/) |
 | `turning_in_bed.mp4` | Turning/repositioning while lying in bed | [Mixkit — Man Lying Down Moving a Lot Because of Not Being Able to Sleep](https://mixkit.co/free-stock-video/man-lying-down-moving-a-lot-because-of-not-being-31414/) |
