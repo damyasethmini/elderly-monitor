@@ -20,35 +20,27 @@ perception:
   use_vlm_fallback: false
 
 state:
-  # Step 3 classifier
-  lying_body_axis_min_deg: 50.0
-  lying_min_bbox_aspect_ratio: 1.00
+  # Number of recent observations considered when smoothing predictions.
+  smoothing_window: 5
+  # Ignore very short state changes unless supported by stronger evidence.
+  min_state_duration_sec: 2.0
+  # Use UNKNOWN when evidence is too weak.
+  unknown_confidence_threshold: 0.40
+  
+  lying_body_axis_angle_deg: 55.0
+  lying_conflicting_bbox_aspect_ratio: 0.90
 
-  sitting_body_axis_max_deg: 45.0
-  sitting_knee_hip_gap_max: 0.24
-  sitting_knee_hip_gap_strong: 0.16
-  sitting_bbox_aspect_min: 0.90
-  sitting_bbox_aspect_max: 1.30
-  sitting_min_keypoints: 7
+  sitting_body_axis_max_deg: 35.0
+  sitting_knee_hip_gap_max: 0.16
+  sitting_bbox_aspect_max: 1.20
+
+  upright_bbox_aspect_max: 1.20
+  upright_pose_span_y_min: 0.45
 
   walking_motion_threshold: 0.15
   walking_bbox_aspect_max: 1.20
 
-  standing_bbox_aspect_max: 0.85
-  standing_pose_span_y_min: 0.45
-
   keypoint_confidence: 0.30
-
-  # Step 4
-  smoothing_window: 5
-  min_state_duration_sec: 2.0
-  unknown_confidence_threshold: 0.40
-  
-events:
-  min_stable_duration_sec: 2.0
-  min_out_of_bed_confirmation_sec: 1.5
-  min_return_confirmation_sec: 1.0
-  min_movement_away_from_bed_norm: 0.15
 
 bed_region:
   # Start with a manually defined polygon for each test video.
