@@ -214,11 +214,7 @@ python -m unittest discover -s tests -v
 
 The current suite contains **32 tests** across Steps 4–7.
 
-You can also run the full sequence using:
-
-```powershell
-.\RUN_ALL.ps1
-```
+For submission and review, the pipeline is intentionally documented step-by-step so each stage can be run, inspected, and debugged independently.
 
 ## Evaluation summary
 

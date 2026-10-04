@@ -1,35 +1,51 @@
-# Failure Cases — Evaluated `test_video.mp4`
+# Failure Cases — Multi-Video Evaluation
 
-These examples are based on the manually reviewed ground truth and the generated Step 7 evaluation report. They document model limitations rather than hiding them.
+These examples are based on manually reviewed ground truth and the generated Step 7 evaluation reports. They document real limitations of the current pose-based baseline rather than hiding them.
 
-## Failure case 1 — early sitting posture confused with lying/standing
+## Failure case 1 — return-to-bed missed under blanket / bed occlusion
 
-- **Video/time:** `test_video.mp4`, approximately `0.0–3.0 s`
-- **Ground truth:** primarily `SITTING_ON_BED`
-- **Prediction:** contains `STANDING`, `LYING_IN_BED`, and transition uncertainty
-- **What went wrong:** the pose geometry during the beginning of the clip is unusual and several body keypoints are not consistently reliable. The rule-based posture classifier interprets some body-axis/bounding-box evidence as standing or lying.
-- **Why the current approach failed:** the classifier is based on fixed pose thresholds and cannot fully understand the bed/person scene context from pose alone.
-- **Possible mitigation:** use stronger temporal context, manually labelled bed geometry, or a local VLM only when pose evidence is ambiguous.
+- **Video:** `return_to_bed.mp4`
+- **Ground truth:** the person approaches the bed, gets onto the bed, and returns to a lying position.
+- **Prediction:** much of the sequence becomes `UNKNOWN`; no `RETURN_TO_BED` event is detected.
+- **Observed evaluation:** activity accuracy ≈ **40.95%**, bed-occupancy accuracy ≈ **8.19%**, duration MAE ≈ **2.29 s**, `RETURN_TO_BED` recall **0%**.
+- **What went wrong:** YOLO Pose loses reliable body keypoints once the person becomes partially hidden by the bed and blanket.
+- **Why the current approach failed:** bed-return recognition depends on pose-derived state and spatial evidence. When pose evidence disappears, the conservative pipeline correctly falls back to `UNKNOWN`, but the event transition cannot be confirmed.
+- **Possible mitigation:** combine pose estimation with a dedicated person/bed detector, manually defined bed geometry, tracking across short occlusions, or an optional local VLM fallback for ambiguous frames.
 
-## Failure case 2 — walking confused with standing
+## Failure case 2 — stretching while seated becomes UNKNOWN
 
-- **Video/time:** approximately `19.75–22.0 s`
-- **Ground truth:** `WALKING`
-- **Prediction:** much of this interval is smoothed into `STANDING`; predicted walking duration is substantially shorter than ground truth.
-- **What went wrong:** the frame-to-frame movement signal is not consistently high enough to satisfy the walking threshold after smoothing.
-- **Why the current approach failed:** walking is inferred using a simple motion heuristic rather than a learned temporal gait model/person tracker.
-- **Possible mitigation:** use multi-frame velocity/trajectory features, optical flow, person tracking, or a lightweight temporal classifier.
+- **Video:** `ambiguous_sitting.mp4`
+- **Ground truth:** `SITTING_ON_BED` for the clip; the person stretches but does not leave the bed.
+- **Prediction:** approximately **8.5 s** is recognized as `SITTING_ON_BED`, while much of the remaining time becomes `UNKNOWN`.
+- **Observed evaluation:** activity accuracy ≈ **46.50%**, `SITTING_ON_BED` precision **100%**, recall **46.5%**, duration MAE ≈ **3.30 s**.
+- **Positive behavior:** the system correctly produces **no false `BED_EXIT`**.
+- **What went wrong:** unusual torso and arm geometry during stretching moves the pose features outside the conservative sitting thresholds.
+- **Why the current approach failed:** the posture classifier uses fixed pose rules rather than a learned temporal posture model.
+- **Possible mitigation:** use multi-frame posture features, additional torso/hip context, a learned lightweight temporal classifier, or ambiguity-specific scene reasoning.
 
-## Failure case 3 — bed exit confirmed earlier than manual confirmation
+## Failure case 3 — turning under blankets causes long UNKNOWN periods
 
-- **Video/time:** bed exit starts around `14.0 s`; clear movement away is manually confirmed around `20.0 s`
-- **Ground truth:** `BED_EXIT` start `14.0 s`, confirmed around `20.0 s`
-- **Prediction:** `BED_EXIT` start `14.0 s`, confirmed `15.5 s`
-- **Result:** event detection is correct, but confirmation is about `4.5 s` early.
-- **What went wrong:** the event detector considers the combination of transition, outside-bed evidence, episode movement, and minimum confirmation duration sufficient before the manually selected clear movement-away point.
-- **Why the current approach failed:** the confirmation rule is intentionally sensitive and heuristic.
-- **Possible mitigation:** tune the confirmation duration/movement threshold, require stronger movement-away persistence, or separately calibrate event start and confirmation rules on a larger labelled set.
+- **Video:** `turning_in_bed.mp4`
+- **Ground truth:** `LYING_IN_BED` for the full clip.
+- **Prediction:** only part of the clip is recognized as `LYING_IN_BED`; most missed time becomes `UNKNOWN`.
+- **Observed evaluation:** activity accuracy ≈ **26.58%**, `LYING_IN_BED` precision **100%**, recall **26.58%**, duration MAE ≈ **3.28 s**.
+- **Positive behavior:** the system correctly produces **no false `BED_EXIT`**.
+- **What went wrong:** blankets, horizontal posture, and limited visible keypoints reduce pose confidence.
+- **Why the current approach failed:** YOLO Pose is the main person/body evidence source, so heavy occlusion limits downstream activity classification.
+- **Possible mitigation:** fuse pose with bed-region occupancy, person segmentation/object detection, temporal tracking, or an optional local vision model for occluded cases.
 
-## Additional limitation — no return-to-bed example
+## Additional observed limitation — walking vs standing
 
-The included clip contains no true `RETURN_TO_BED`. Therefore return precision/recall should be reported as **N/A for this clip**, not interpreted as a measured failure rate. A separate video containing `OUT_OF_BED → approach bed → sit on bed → lie down` is required to evaluate return detection properly.
+In `test_video.mp4`, the final walking period is partly smoothed into `STANDING`. The simple motion heuristic is not always strong enough to separate slow walking from standing at a 2 FPS sampling rate.
+
+Possible improvements include trajectory velocity, optical flow, person tracking, or a small temporal motion classifier.
+
+## Bed-exit timing note
+
+For `test_video.mp4`, the system correctly detects the `BED_EXIT` start at approximately **14.0 s**, but confirms it earlier than the manually selected clear movement-away point. The event-type precision and recall remain correct because event matching uses start time, while confirmation-time error is reported separately.
+
+## Timeline continuity issue found during evaluation
+
+Testing `turning_in_bed.mp4` exposed a short-segment merge bug that could create a gap in the generated timeline. The merge logic was fixed and a dedicated regression test, `test_short_segment_merging_does_not_create_timeline_gaps`, was added.
+
+The final suite contains **32 passing tests**.
